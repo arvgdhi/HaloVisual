@@ -6,10 +6,14 @@ Works with anything in the Windows media controls (Spotify app, Spotify web in C
 
 ## Run
 
+Easiest: install `Halo-Setup-<version>.exe` (no npm needed). To run from source:
+
 ```
 npm install
 npm start
 ```
+If `npm start` says "Electron failed to install correctly", run `npm run fix-electron` (downloads Electron directly from GitHub), then `npm start` again. If it still fails, add an antivirus exclusion for the folder.
+
 The settings window opens by itself the first time. After that, click the Halo icon in the system tray (check the ^ overflow), or right-click it for quick toggles. The terminal prints what Halo detects (`[media]`, `[lyrics]`, `[art]`, `[fonts]`).
 
 ## Settings window
