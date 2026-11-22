@@ -8,7 +8,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis --x64"
+    "dist": "electron-builder --win nsis --x64",
+    "fix-electron": "powershell -NoProfile -ExecutionPolicy Bypass -File fix-electron.ps1"
   },
   "devDependencies": {
     "electron": "^33.0.0",
