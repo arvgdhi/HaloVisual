@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-const IN = ['settings', 'media', 'art', 'lyrics', 'live-pos', 'live-box'];
-const OUT = ['layout', 'live-pos', 'live-box', 'prefs', 'ignore', 'edit-done'];
+const IN = ['settings', 'media', 'art', 'lyrics', 'live-pos', 'live-box', 'audio-frame'];
+const OUT = ['layout', 'live-pos', 'live-box', 'prefs', 'ignore', 'edit-done', 'audio-frame', 'audio-retry'];
 
 contextBridge.exposeInMainWorld('halo', {
   on: (channel, cb) => {

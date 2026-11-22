@@ -1,10 +1,11 @@
 const {
-  app, BrowserWindow, Tray, Menu, nativeImage, screen, session, desktopCapturer, ipcMain, globalShortcut,
+  app, BrowserWindow, Tray, Menu, nativeImage, screen, session, desktopCapturer, ipcMain, globalShortcut, powerMonitor,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const readline = require('readline');
 const { spawn } = require('child_process');
+const mediaFilter = require('./media-filter');
 app.setAppUserModelId('com.halo.overlay');
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -92,6 +93,7 @@ const DEFAULTS = {
   lineBlur: false,         // blur lines that are further from the current one
   layer: 'desktop',        // 'desktop' = behind all apps, 'top' = above all apps
   fadeSec: 10,             // fade everything after this many seconds paused (0 = never)
+  musicOnly: true,         // ignore browser videos like Reels/Shorts unless they look like music
   glowDisplays: null,      // null = every screen, otherwise an array of display ids
   showDisc: true,
   discSize: 200,
@@ -168,13 +170,41 @@ function broadcast(channel, data) {
   for (const w of liveOverlays()) w.webContents.send(channel, data);
 }
 
+let audioRetryTimer = null;
+let lastAudioTriggerAt = 0;
+
+function needsAudio(win) {
+  return !!(win && !win.isDestroyed() && ((settings.glow && glowOn(win.displayId)) || settings.lyricStyle === 'beat'));
+}
+function audioOwnerWin() {
+  const live = liveOverlays().filter(needsAudio);
+  if (!live.length) return null;
+  return live.find((w) => settings.glow && glowOn(w.displayId)) || live[0];
+}
+function triggerAudio(win, forceRestart = false) {
+  if (!win || win.isDestroyed()) return;
+  lastAudioTriggerAt = Date.now();
+  // getDisplayMedia needs a user gesture, hence the `true`
+  win.webContents
+    .executeJavaScript(`typeof startAudio==="function"&&startAudio(${forceRestart ? 'true' : 'false'})`, true)
+    .catch(() => {});
+}
+
 function sendSettings(win) {
   if (win.isDestroyed()) return;
   const id = win.displayId;
   const disp = screen.getAllDisplays().find((d) => d.id === id) || screen.getPrimaryDisplay();
+  const live = liveOverlays();
+  const owner = audioOwnerWin();
+  const isOwner = owner === win;
   win.webContents.send('settings', {
     ...settings,
-    here: { glow: glowOn(id), primary: id === screen.getPrimaryDisplay().id },
+    here: {
+      glow: glowOn(id),
+      primary: id === screen.getPrimaryDisplay().id,
+      audioOwner: isOwner,
+      multiScreen: live.length > 1,
+    },
     editMode,
     preview: settingsVisible(),
     origin: { x: disp.bounds.x, y: disp.bounds.y }, // this window's top-left in global desktop coordinates
@@ -182,8 +212,8 @@ function sendSettings(win) {
     lyricPos: effPos(settings.lyricG, 0.5, 0.84),
     discPos: effPos(settings.discG, 0.11, 0.76),
   });
-  // getDisplayMedia needs a user gesture, hence the `true`
-  if (glowOn(id) || settings.lyricStyle === 'beat') win.webContents.executeJavaScript('startAudio()', true).catch(() => {});
+  if (isOwner) triggerAudio(win, false);
+  else win.webContents.executeJavaScript('typeof stopAudio==="function"&&stopAudio()', false).catch(() => {});
 }
 function broadcastSettings() { for (const w of liveOverlays()) sendSettings(w); }
 
@@ -242,6 +272,8 @@ function createOverlay(display) {
 }
 
 function createOverlays() {
+  clearTimeout(audioRetryTimer);
+  audioRetryTimer = null;
   for (const w of liveOverlays()) w.destroy();
   overlays = screen.getAllDisplays().map(createOverlay);
 }
@@ -323,7 +355,7 @@ const NUM = {
   lyricRot: [-180, 180, 0], discRot: [-180, 180, 0], lyricW: [120, 3000, 0], lyricH: [40, 1500, 0],
   pastLines: [0, 8, 0], futureLines: [0, 8, 0], offsetMs: [-8000, 8000, 0], fadeSec: [0, 300, 0],
 };
-const BOOL = ['glow', 'lyrics', 'showDisc', 'idleGlow', 'rainbow', 'useAlbum', 'lineBlur', 'bold', 'startWithWindows'];
+const BOOL = ['glow', 'lyrics', 'showDisc', 'idleGlow', 'rainbow', 'useAlbum', 'lineBlur', 'bold', 'startWithWindows', 'musicOnly'];
 
 function sanitize(d) {
   const patch = {};
@@ -372,6 +404,7 @@ function commit(patch) {
   scheduleSave();
   applyLayerFlags();
   broadcastSettings();
+  if ('musicOnly' in patch) applySessions(lastSessions);
   sendState();
   scheduleTray();
 }
@@ -450,15 +483,74 @@ function loadSystemFonts() {
 }
 
 // ---------- system audio loopback (no native modules needed) ----------
+let pendingSources = null;
+function getScreenSources() {
+  if (!pendingSources) {
+    pendingSources = desktopCapturer
+      .getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } })
+      .finally(() => { pendingSources = null; });
+  }
+  return pendingSources;
+}
+function isAllowedPermission(permission, details) {
+  if (permission === 'local-fonts' || permission === 'display-capture') return true;
+  if (permission === 'media') {
+    // Electron 33 triggers 'media' with mediaTypes: [] for getDisplayMedia loopback capture;
+    // still deny camera/microphone checks where mediaType/mediaTypes specify 'audio' or 'video'.
+    if (details && Array.isArray(details.mediaTypes)) return details.mediaTypes.length === 0;
+    if (details && details.mediaType) return details.mediaType === 'unknown';
+  }
+  return false;
+}
 function setupLoopback() {
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'local-fonts'));
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'local-fonts');
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) => {
+    const ok = isAllowedPermission(permission, details);
+    if (!ok) console.log('[perm denied]', permission, details && details.mediaTypes);
+    cb(ok);
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission, _origin, details) => {
+    const ok = isAllowedPermission(permission, details);
+    if (!ok) console.log('[perm check denied]', permission, details && details.mediaType);
+    return ok;
+  });
   session.defaultSession.setDisplayMediaRequestHandler((_req, callback) => {
-    desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
-      callback({ video: sources[0], audio: 'loopback' });
-    }).catch(() => callback({}));
+    getScreenSources()
+      .then((sources) => {
+        if (!sources || !sources.length) {
+          console.log('[loopback] no screen sources available');
+          callback({});
+          return;
+        }
+        callback({ video: sources[0], audio: 'loopback' });
+      })
+      .catch((e) => {
+        console.log('[loopback] getSources failed:', e && e.message);
+        callback({});
+      });
   });
 }
+
+ipcMain.on('audio-frame', (e, data) => {
+  const owner = audioOwnerWin();
+  if (!owner || e.sender !== owner.webContents) return;
+  for (const w of liveOverlays()) {
+    if (w !== owner && needsAudio(w)) w.webContents.send('audio-frame', data);
+  }
+});
+ipcMain.on('audio-retry', (e, opts) => {
+  const owner = audioOwnerWin();
+  if (!owner || e.sender !== owner.webContents) return;
+  const restart = !!(opts && opts.restart);
+  const reqDelay = Number(opts && opts.delayMs) || 0;
+  const minWait = Math.max(0, 1200 - (Date.now() - lastAudioTriggerAt));
+  const wait = Math.max(minWait, reqDelay);
+  clearTimeout(audioRetryTimer);
+  audioRetryTimer = setTimeout(() => {
+    audioRetryTimer = null;
+    const curOwner = audioOwnerWin();
+    if (curOwner) triggerAudio(curOwner, restart);
+  }, wait);
+});
 
 // ---------- tray ----------
 let tray = null;
@@ -514,13 +606,19 @@ async function loadLyrics(m) {
   if (!m.title) return;
   let data = null;
   try {
-    const q = new URLSearchParams({ artist_name: m.artist, track_name: m.title });
+    const q = new URLSearchParams({ artist_name: m.artist || '', track_name: m.title });
     if (m.durMs) q.set('duration', String(Math.round(m.durMs / 1000)));
     data = await fetchJson(`https://lrclib.net/api/get?${q}`);
-    if (!data || !data.syncedLyrics) {
-      const clean = m.title.replace(/\s*[(\[].*?[)\]]/g, '').replace(/\s-\s.*$/, '');
-      const list = await fetchJson(`https://lrclib.net/api/search?${new URLSearchParams({ q: `${m.artist} ${clean}` })}`);
-      data = (list || []).find((x) => x.syncedLyrics) || null;
+    const clean = mediaFilter.cleanTitle(m.title);
+    if ((!data || !data.syncedLyrics) && clean && clean !== m.title) {
+      const q2 = new URLSearchParams({ artist_name: m.artist || '', track_name: clean });
+      if (m.durMs) q2.set('duration', String(Math.round(m.durMs / 1000)));
+      data = await fetchJson(`https://lrclib.net/api/get?${q2}`);
+    }
+    if ((!data || !data.syncedLyrics) && m.artist) {
+      const term = clean || m.title;
+      const list = await fetchJson(`https://lrclib.net/api/search?${new URLSearchParams({ q: `${m.artist} ${term}` })}`);
+      data = mediaFilter.pickBestLyricMatch(m, list);
     }
   } catch (e) { console.log('[lyrics] lookup failed:', e.message); }
   if (token !== lyricToken) return; // track changed meanwhile
@@ -533,9 +631,10 @@ async function loadLyrics(m) {
 let artToken = 0;
 async function fetchArtFallback(m, token) {
   try {
-    const clean = m.title.replace(/\s*[(\[].*?[)\]]/g, '').replace(/\s-\s.*$/, '');
-    const r = await fetchJson(`https://itunes.apple.com/search?${new URLSearchParams({ term: `${m.artist} ${clean}`, entity: 'song', limit: '1' })}`);
-    const url = r && r.results && r.results[0] && r.results[0].artworkUrl100;
+    if (!m.title || !m.artist) return;
+    const clean = mediaFilter.cleanTitle(m.title) || m.title;
+    const r = await fetchJson(`https://itunes.apple.com/search?${new URLSearchParams({ term: `${m.artist} ${clean}`, entity: 'song', limit: '5' })}`);
+    const url = mediaFilter.pickBestItunesArt(m, r && r.results);
     if (!url) { console.log('[art] fallback found nothing'); return; }
     const img = await fetch(url.replace('100x100bb', '600x600bb'));
     if (!img.ok) return;
@@ -550,44 +649,85 @@ async function fetchArtFallback(m, token) {
 // ---------- media session via PowerShell ----------
 let currentKey = null;
 let lastLogged = '';
+let lastIgnoredSig = '';
+let lastSessions = [];
+let thumbRequestedFor = null;
 
-function onMediaLine(line) {
-  let m;
-  try { m = JSON.parse(line); } catch { console.log('[media raw]', line.slice(0, 200)); return; }
-  const sig = m.none ? 'none' : `${m.app} | ${m.artist} - ${m.title} | playing=${m.playing}`;
-  if (sig !== lastLogged) { lastLogged = sig; console.log('[media]', sig); }
+function applySessions(sessions) {
+  lastSessions = Array.isArray(sessions) ? sessions : [];
+  const m = mediaFilter.pickBestSession(lastSessions, settings.musicOnly);
 
-  if (m.none) {
+  if (!m) {
+    const playingOther = lastSessions.filter((s) => s && s.playing);
+    if (playingOther.length) {
+      const igSig = playingOther.map((s) => `${s.app}|${s.artist}-${s.title}`).join(';');
+      if (igSig !== lastIgnoredSig) {
+        lastIgnoredSig = igSig;
+        console.log('[media] ignored non-music:', igSig);
+      }
+    }
+    const noneMsg = { none: true };
+    if (lastLogged !== 'none') { lastLogged = 'none'; console.log('[media] none'); }
     if (currentKey !== null) {
-      currentKey = null; lastArt = null; lastMedia = m; lastLyrics = { lines: null };
+      currentKey = null; lastArt = null; thumbRequestedFor = null;
+      ++lyricToken; ++artToken;
+      lastLyrics = { lines: null };
       broadcast('lyrics', lastLyrics);
       broadcast('art', null);
     }
-    broadcast('media', m);
+    lastMedia = noneMsg;
+    broadcast('media', noneMsg);
     return;
   }
+
+  lastIgnoredSig = '';
+  const sig = `${m.app} | ${m.artist} - ${m.title} | playing=${m.playing}`;
+  if (sig !== lastLogged) { lastLogged = sig; console.log('[media]', sig); }
+
   if (m.key !== currentKey) {
     currentKey = m.key;
     lastArt = null;
+    thumbRequestedFor = null;
     broadcast('art', null);
     loadLyrics(m);
     // if Windows hands us no cover within a couple of seconds, look one up
     const token = ++artToken;
     setTimeout(() => { if (token === artToken && !lastArt) fetchArtFallback(m, token); }, 2500);
   }
-  if (m.art) {
-    lastArt = m.art;
-    console.log('[art] cover from Windows,', Math.round(m.art.length / 1024), 'KB');
-    broadcast('art', m.art);
+
+  const art = m.art;
+  if (art) {
     delete m.art;
+    lastArt = art;
+    console.log('[art] cover from Windows,', Math.round(art.length / 1024), 'KB');
+    broadcast('art', art);
+  } else if (!lastArt && m.hasThumb && thumbRequestedFor !== m.key && mediaProc && mediaProc.stdin.writable) {
+    thumbRequestedFor = m.key;
+    try { mediaProc.stdin.write(`thumb:${m.key}\n`); } catch { /* ignore */ }
   }
-  lastMedia = m;
-  broadcast('media', m);
+
+  const out = { ...m };
+  delete out.art;
+  lastMedia = out;
+  broadcast('media', out);
+}
+
+function onMediaLine(line) {
+  let msg;
+  try { msg = JSON.parse(line); } catch { console.log('[media raw]', line.slice(0, 200)); return; }
+  if (msg && 'sessions' in msg) {
+    const arr = Array.isArray(msg.sessions) ? msg.sessions : (msg.sessions ? [msg.sessions] : []);
+    applySessions(arr);
+    return;
+  }
+  if (msg && msg.none) { applySessions([]); return; }
+  if (msg && msg.key) applySessions([msg]);
 }
 
 let mediaProc = null;
 function startMedia() {
   const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath('media.ps1')], { windowsHide: true });
+  ps.stdin.on('error', () => {});
   readline.createInterface({ input: ps.stdout }).on('line', onMediaLine);
   readline.createInterface({ input: ps.stderr }).on('line', (l) => console.log('[media.ps1 error]', l));
   ps.on('exit', () => { if (!quitting) setTimeout(startMedia, 3000); });
@@ -605,12 +745,20 @@ app.whenReady().then(() => {
   startZorder();
   setInterval(applyZ, 1500);
   const refresh = () => { editMode = false; createOverlays(); buildTray(); sendState(); };
+  const recoverAudio = () => {
+    setTimeout(() => {
+      const owner = audioOwnerWin();
+      if (owner) triggerAudio(owner, true);
+    }, 1500);
+  };
   // emergency exits that work even if the overlay or tray is hard to reach
   globalShortcut.register('CommandOrControl+Alt+L', () => setEdit(!editMode));
   globalShortcut.register('CommandOrControl+Alt+Q', () => app.quit());
   screen.on('display-added', refresh);
   screen.on('display-removed', refresh);
   screen.on('display-metrics-changed', refresh);
+  powerMonitor.on('resume', recoverAudio);
+  powerMonitor.on('unlock-screen', recoverAudio);
   // the settings window opens by itself the first time, and any time from the tray icon
   if (firstRun || !settings.settingsShown) { settings.settingsShown = true; scheduleSave(); openSettings(); }
 });
@@ -618,6 +766,7 @@ app.whenReady().then(() => {
 app.on('second-instance', openSettings);
 app.on('before-quit', () => {
   quitting = true;
+  clearTimeout(audioRetryTimer);
   globalShortcut.unregisterAll();
   if (mediaProc) mediaProc.kill();
   if (zproc) zproc.kill();

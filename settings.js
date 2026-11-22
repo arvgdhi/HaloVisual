@@ -324,7 +324,8 @@ function buildLayout(sec) {
       row('Reset positions', 'Puts both back to their starting places', h('button', { class: 'btn', type: 'button', onclick: () => hs.act('reset-layout') }, 'Reset'))),
     mod('Behaviour', null,
       row('Layer', 'Desktop keeps everything behind your apps', seg('layer', [['desktop', 'Behind apps'], ['top', 'Above apps']])),
-      row('Fade after pause', 'Seconds of silence before everything fades. 0 keeps it visible.', slider('fadeSec', { rmin: 0, rmax: 60, min: 0, max: 300, step: 1, unit: 's', zero: 'never' }))),
+      row('Fade after pause', 'Seconds of silence before everything fades. 0 keeps it visible.', slider('fadeSec', { rmin: 0, rmax: 60, min: 0, max: 300, step: 1, unit: 's', zero: 'never' })),
+      row('Only react to music', 'Ignore Shorts, Reels and other browser videos', toggle('musicOnly'))),
   );
 }
 

@@ -11,11 +11,11 @@ let S = {
   glow: true, lyrics: true, idleGlow: true, thickness: 6, glowSize: 1, useAlbum: true, rainbow: false,
   primary: '#7c5cff', secondary: '#ff4fa3', offsetMs: 0, fontSize: 34, font: 'Segoe UI', bold: true,
   lyricStyle: 'classic', lyricAlign: 'center', nativeTheme: 'dark', lyricColor: 'white', shape: 'classic',
-  lyricW: 760, lyricH: 170, pastLines: 0, futureLines: 1, lineBlur: false, fadeSec: 10,
+  lyricW: 760, lyricH: 170, pastLines: 0, futureLines: 1, lineBlur: false, fadeSec: 10, musicOnly: true,
   showDisc: true, discSize: 200, lyricRot: 0, discRot: 0,
   lyricPos: { x: innerWidth / 2, y: innerHeight * 0.84 }, discPos: { x: innerWidth * 0.11, y: innerHeight * 0.76 },
   origin: { x: 0, y: 0 }, virt: { x: 0, y: 0, w: innerWidth, h: innerHeight },
-  here: { glow: true, primary: true }, editMode: false, preview: false,
+  here: { glow: true, primary: true, audioOwner: true, multiScreen: false }, editMode: false, preview: false,
 };
 const DEFAULT_S = S;
 let media = { none: true };
@@ -33,6 +33,14 @@ halo.on('art', (b64) => {
   if (!b64) { labelEl.style.backgroundImage = ''; return; }
   labelEl.style.backgroundImage = `url(data:image/jpeg;base64,${b64})`;
   extractColors(b64);
+});
+halo.on('audio-frame', (d) => {
+  if (!d || S.here.audioOwner) return;
+  remoteRaw = Number(d.raw) || 0;
+  remoteAt = performance.now();
+  if (d.bands && d.bands.length >= NB) {
+    for (let i = 0; i < NB; i++) bands[i] = d.bands[i] / 255;
+  }
 });
 
 // ---------- colours ----------
@@ -218,33 +226,151 @@ wheelHandler('fontSize', 'lyricRot', 12, 240, 3, lyricsEl);
 wheelHandler('discSize', 'discRot', 60, 1000, 12, playerEl);
 
 // ---------- audio (system loopback) ----------
-let analyser = null, freq = null, starting = false;
-async function startAudio() {
-  if (analyser || starting) return;
+const RETRY_DELAYS = [1500, 3000, 5000, 10000, 15000, 30000];
+const STALE_THRESHOLDS = [8000, 20000, 50000, 120000];
+const NB = 64;
+const bands = new Float32Array(NB);
+const relayBuf = new Uint8Array(NB);
+
+let audioCtx = null, audioStream = null, audioOnlyStream = null, audioTrack = null, audioSource = null, audioGain = null;
+let analyser = null, freq = null, starting = false, queuedRestart = false, captureGen = 0;
+let retryAttempt = 0, remoteRaw = 0, remoteAt = 0, lastRelayAt = 0;
+let silentSince = 0, staleRestarts = 0, lastTrackKey = null, wasPlaying = false;
+
+function stopAudio() {
+  captureGen++;
+  const prevTrack = audioTrack;
+  const prevCtx = audioCtx;
+  audioTrack = null;
+  audioCtx = null;
+  audioOnlyStream = null;
+  analyser = null;
+  freq = null;
+  if (audioSource) { try { audioSource.disconnect(); } catch {} audioSource = null; }
+  if (audioGain) { try { audioGain.disconnect(); } catch {} audioGain = null; }
+  if (prevTrack) prevTrack.onended = null;
+  if (audioStream) {
+    audioStream.getTracks().forEach((t) => { try { t.stop(); } catch {} });
+    audioStream = null;
+  }
+  if (prevCtx) {
+    prevCtx.onstatechange = null;
+    if (prevCtx.state !== 'closed') prevCtx.close().catch(() => {});
+  }
+}
+
+async function startAudio(forceRestart = false) {
+  if (starting) { if (forceRestart) queuedRestart = true; return; }
+  if (!forceRestart && analyser && audioTrack && audioTrack.readyState === 'live' && audioCtx) {
+    if (audioCtx.state === 'running') return;
+    if (audioCtx.state === 'suspended') {
+      try {
+        await audioCtx.resume();
+        if (audioCtx && audioCtx.state === 'running') return;
+      } catch { /* fall through to full restart */ }
+    }
+  }
+
   starting = true;
+  queuedRestart = false;
+  if (forceRestart || analyser || audioCtx || audioStream) stopAudio();
+  const myGen = ++captureGen;
+
+  let stream = null;
+  let ac = null;
   try {
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    if (myGen !== captureGen) {
+      stream.getTracks().forEach((t) => { try { t.stop(); } catch {} });
+      return;
+    }
     stream.getVideoTracks().forEach((t) => t.stop());
-    if (!stream.getAudioTracks().length) { console.error('no audio track from loopback'); starting = false; return; }
-    const ac = new AudioContext();
+    const aTracks = stream.getAudioTracks();
+    if (!aTracks.length) throw new Error('no audio track from loopback');
+
+    const track = aTracks[0];
+    const aOnly = new MediaStream([track]);
+    ac = new AudioContext();
     await ac.resume();
-    console.log('audio capture started, tracks:', stream.getAudioTracks().length, 'ctx:', ac.state);
-    const src = ac.createMediaStreamSource(new MediaStream(stream.getAudioTracks()));
+    if (myGen !== captureGen) {
+      stream.getTracks().forEach((t) => { try { t.stop(); } catch {} });
+      if (ac.state !== 'closed') ac.close().catch(() => {});
+      return;
+    }
+    if (ac.state !== 'running') throw new Error(`AudioContext state=${ac.state}`);
+
+    const src = ac.createMediaStreamSource(aOnly);
     const an = ac.createAnalyser();
     an.fftSize = 1024;
     an.smoothingTimeConstant = 0.7;
-    freq = new Uint8Array(an.frequencyBinCount);
+    // Keep the Web Audio pull graph active with zero audible output.
+    const gain = ac.createGain();
+    gain.gain.value = 0;
     src.connect(an);
+    an.connect(gain);
+    gain.connect(ac.destination);
+
+    audioStream = stream;
+    audioOnlyStream = aOnly;
+    audioTrack = track;
+    audioCtx = ac;
+    audioSource = src;
+    audioGain = gain;
+    freq = new Uint8Array(an.frequencyBinCount);
     analyser = an;
+    retryAttempt = 0;
+
+    track.onended = () => {
+      if (audioTrack !== track) return;
+      console.warn('audio loopback track ended');
+      stopAudio();
+      if (S.here.audioOwner) halo.send('audio-retry', { restart: true, delayMs: 1200 });
+    };
+    ac.onstatechange = () => {
+      if (audioCtx !== ac) return;
+      if (ac.state === 'suspended') {
+        ac.resume().catch(() => {
+          if (audioCtx === ac && S.here.audioOwner) halo.send('audio-retry', { restart: false, delayMs: 1200 });
+        });
+      } else if (ac.state === 'closed') {
+        stopAudio();
+        if (S.here.audioOwner) halo.send('audio-retry', { restart: true, delayMs: 1200 });
+      }
+    };
+    console.log('audio capture started, tracks:', aTracks.length, 'ctx:', ac.state, 'rate:', ac.sampleRate);
   } catch (e) {
-    console.error('audio capture failed', e && e.message);
+    console.error('audio capture failed:', e && e.message);
+    if (stream) stream.getTracks().forEach((t) => { try { t.stop(); } catch {} });
+    if (ac && ac.state !== 'closed') ac.close().catch(() => {});
+    if (myGen !== captureGen) return;
+    stopAudio();
+    if (S.here.audioOwner) {
+      const delayMs = RETRY_DELAYS[Math.min(retryAttempt, RETRY_DELAYS.length - 1)];
+      retryAttempt++;
+      halo.send('audio-retry', { restart: false, delayMs });
+    }
+  } finally {
+    starting = false;
+    if (queuedRestart && S.here.audioOwner) {
+      queuedRestart = false;
+      halo.send('audio-retry', { restart: true, delayMs: 0 });
+    }
   }
-  starting = false;
 }
 window.startAudio = startAudio;
+window.stopAudio = stopAudio;
 
-const NB = 64;
-const bands = new Float32Array(NB);
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  let devTimer = null;
+  navigator.mediaDevices.addEventListener('devicechange', () => {
+    if (!S.here.audioOwner) return;
+    clearTimeout(devTimer);
+    devTimer = setTimeout(() => {
+      if (S.here.audioOwner) halo.send('audio-retry', { restart: true, delayMs: 0 });
+    }, 1200);
+  });
+}
+
 function readEnergy() {
   if (!analyser) { for (let i = 0; i < NB; i++) bands[i] *= 0.9; return 0; }
   analyser.getByteFrequencyData(freq);
@@ -259,6 +385,30 @@ function readEnergy() {
   for (let i = 1; i < 8; i++) bass += freq[i];
   for (let i = 1; i < 120; i++) all += freq[i];
   return Math.min(1, (bass / 7 / 255) * 0.7 + (all / 119 / 255) * 1.3);
+}
+
+function checkStaleAudio(now, raw) {
+  if (!S.here.audioOwner) { silentSince = 0; staleRestarts = 0; return; }
+  const key = media.none ? null : media.key;
+  const playing = !!media.playing && !media.none;
+  if (key !== lastTrackKey || (playing && !wasPlaying)) {
+    lastTrackKey = key;
+    silentSince = 0;
+    staleRestarts = 0;
+  }
+  wasPlaying = playing;
+  if (!playing || raw > 0.002) {
+    silentSince = 0;
+    if (raw > 0.002) staleRestarts = 0;
+    return;
+  }
+  if (!silentSince) { silentSince = now; return; }
+  if (staleRestarts < STALE_THRESHOLDS.length && now - silentSince >= STALE_THRESHOLDS[staleRestarts]) {
+    staleRestarts++;
+    silentSince = now;
+    console.warn('audio loopback silent while playing; restarting #' + staleRestarts);
+    halo.send('audio-retry', { restart: true, delayMs: 0 });
+  }
 }
 
 // ---------- colours from the album cover ----------
@@ -300,7 +450,8 @@ function extractColors(b64) {
 let lastActive = performance.now();
 let vis = 1;
 function updateVis(now, raw) {
-  if (media.playing || raw > 0.04) lastActive = now;
+  const active = !!media.playing || (!S.musicOnly && raw > 0.04);
+  if (active) lastActive = now;
   const idleTooLong = S.fadeSec > 0 && now - lastActive > S.fadeSec * 1000;
   const target = idleTooLong && !S.editMode && !S.preview ? 0 : 1;
   vis += (target - vis) * (target ? 0.15 : 0.025);
@@ -437,7 +588,7 @@ function drawGlow(now, raw) {
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
   if (!S.glow || !S.here.glow || vis === 0) return;
-  let energy = raw;
+  let energy = (!S.musicOnly || media.playing) ? raw : 0;
   if (energy < 0.03 && S.idleGlow) energy = 0.12 + 0.05 * Math.sin(now / 900);
   level = Math.max(energy, level * 0.88);
   const [tp, ts] = targetColors(now);
@@ -698,7 +849,19 @@ function updateLyrics(now) {
 let accentTick = 0;
 function frame(now) {
   requestAnimationFrame(frame);
-  const raw = S.here.glow || S.lyricStyle === 'beat' ? readEnergy() : 0;
+  let raw = 0;
+  if (S.here.audioOwner) {
+    raw = readEnergy();
+    checkStaleAudio(now, raw);
+    if (S.here.multiScreen && now - lastRelayAt > 32) {
+      lastRelayAt = now;
+      for (let i = 0; i < NB; i++) relayBuf[i] = Math.round(clamp01(bands[i]) * 255);
+      halo.send('audio-frame', { raw, bands: relayBuf });
+    }
+  } else if (S.here.glow || S.lyricStyle === 'beat') {
+    if (now - remoteAt <= 250) raw = remoteRaw;
+    else { for (let i = 0; i < NB; i++) bands[i] *= 0.9; }
+  }
   lastRaw = raw;
   updateVis(now, raw);
   drawGlow(now, raw);
