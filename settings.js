@@ -260,7 +260,6 @@ function buildLyrics(sec) {
 function buildGlow(sec) {
   sec.textContent = '';
   const shapeChips = meta.shapes.map(([id, label]) => chip(label, () => set({ shape: id }), () => S().shape === id));
-  const custom = S().primary;
   const palChips = meta.palettes.map(([label, a, b]) => chip(label,
     () => set({ primary: a, secondary: b }),
     () => !S().rainbow && !S().useAlbum && S().primary.toLowerCase() === a && S().secondary.toLowerCase() === b,

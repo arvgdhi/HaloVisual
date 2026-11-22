@@ -58,15 +58,6 @@
     m.set(idx, out);
     return out;
   }
-  const flatCache = new WeakMap();
-  function flatWords(L) {
-    let f = flatCache.get(L);
-    if (f) return f;
-    f = [];
-    for (let i = 0; i < L.length; i++) for (const w of lineWords(L, i)) f.push({ ...w, li: i });
-    flatCache.set(L, f);
-    return f;
-  }
 
   // ---------- icons for words ----------
   const ICON = {
@@ -117,7 +108,6 @@
   }
 
   const fontFor = (S) => `'${S.font}', 'Segoe UI', sans-serif`;
-  const NATIVE_FONT = "'Segoe UI Variable Text','Segoe UI',system-ui,-apple-system,sans-serif";
 
   // ======================================================================
   // Kinetic type
@@ -559,7 +549,6 @@
         () => [['kw', 'yield '], ['p', '']],
       ];
       const END = [[['p', ')'], ['p', ';']], [['p', ';']], [['p', ';']]];
-      const isCall = (t) => t === 0;
 
       function makeRow(i, withCursor) {
         const t = i % 3;
@@ -1001,10 +990,8 @@
     const bal = mk('div', 'mbal', head);
     const list = mk('div', 'mlist', root);
     const amt = (i) => 1 + (hash(i * 31 + 7) % 49900) / 100;
-    const cum = []; let run = 1000;
-    for (let i = 0; i < env.L.length; i++) { if (env.L[i].text) run += amt(i); cum.push(run); }
     const cumAt = [];
-    run = 1000;
+    let run = 1000;
     for (let i = 0; i < env.L.length; i++) { if (env.L[i].text) run += amt(i); cumAt[i] = run; }
     const els = new Map();
     let curIdx = -9, shown = 1000;
@@ -1244,5 +1231,5 @@
   };
 
   window.SC = SC;
-  window.SceneKit = { lineWords, flatWords, iconFor, hash, rng };
+  window.SceneKit = { lineWords, iconFor, hash, rng };
 })();

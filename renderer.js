@@ -125,9 +125,7 @@ function applyLayout() {
   tagEl.textContent = `Lyrics · ${Math.round(S.lyricW)} × ${Math.round(S.lyricH)}`;
   if (S.editMode !== lastEdit) { lastEdit = S.editMode; ignoring = true; drag = null; rs = null; }
   setAccent();
-  layoutDirty = true;
 }
-let layoutDirty = true;
 let ignoring = true;
 
 // resize handles on the lyric box

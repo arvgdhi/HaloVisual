@@ -6,7 +6,7 @@ Works with anything in the Windows media controls (Spotify app, Spotify web in C
 
 ## Run
 
-Easiest: install `Halo-Setup-<version>.exe` (no npm needed). To run from source:
+Easiest: download `Halo-Setup-<version>.exe` from GitHub Releases (or build it yourself with `npm run dist`). To run from source:
 
 ```
 npm install
@@ -26,7 +26,7 @@ The settings window opens by itself the first time. After that, click the Halo i
 - **Lyrics**: any installed font (scrollable picker, each name shown in its own font), bold, size, left / centre / right alignment, colour, lines before and after the current one (Spotify-style, with optional blur), box width and height, timing offset.
 - **Glow**: shape, thickness, spread, colour source (album art, rainbow, presets, your own two colours), which screens get it.
 - **Record**: show, size, rotation.
-- **Layout**: edit on screen, lyric rotation, reset positions, layer (behind or above apps), fade-after-pause seconds (0 = never).
+- **Layout**: edit on screen, lyric rotation, reset positions, layer (behind or above apps), fade-after-pause seconds (0 = never), only react to music (ignores Shorts, Reels and other browser videos).
 - **General**: start with Windows (installed build only), shortcuts, quit.
 
 While the settings window is open and nothing is playing, your screen shows a sample song so you can preview each style. (It sits on the desktop layer, so set Layout > Layer to "Above apps", or use Edit on screen, if windows are covering it.)
