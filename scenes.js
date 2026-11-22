@@ -167,46 +167,311 @@
     };
   };
 
-  // Fisheye: a tight stack of words bulging through a lens (optionally with icons)
+  // Fisheye: true spherical barrel-distortion lens via offscreen 2D text + WebGL fragment shader
+  const FISH_VS = 'attribute vec2 aPos;varying vec2 vUv;void main(){vUv=aPos*0.5+0.5;gl_Position=vec4(aPos,0.0,1.0);}';
+  const FISH_FS = `
+    precision mediump float;
+    varying vec2 vUv;
+    uniform sampler2D uTex;
+    uniform float uZoom;
+    uniform float uK1;
+    uniform float uK2;
+    uniform float uChroma;
+    vec4 sampleSafe(vec2 uv) {
+      if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec4(0.0);
+      return texture2D(uTex, uv);
+    }
+    void main() {
+      vec2 p = (vUv - 0.5) * 2.0;
+      float r2 = dot(p, p);
+      float r = sqrt(r2);
+      float warp = uZoom * (1.0 + uK1 * r2 + uK2 * r2 * r2);
+      float ca = uChroma * r2;
+      vec2 uvR = 0.5 + 0.5 * p * warp * (1.0 + ca);
+      vec2 uvG = 0.5 + 0.5 * p * warp;
+      vec2 uvB = 0.5 + 0.5 * p * warp * (1.0 - ca);
+      vec4 tR = sampleSafe(uvR);
+      vec4 tG = sampleSafe(uvG);
+      vec4 tB = sampleSafe(uvB);
+      float a = max(tR.a, max(tG.a, tB.a));
+      float shade = 1.0 - 0.22 * min(r2, 1.0);
+      float edge = 1.0 - smoothstep(0.76, 1.0, r);
+      vec3 rgb = vec3(tR.r, tG.g, tB.b) * shade * edge;
+      gl_FragColor = vec4(rgb, a * edge);
+    }
+  `;
+
   function fisheyeScene(icons) {
     return (root, env) => {
       root.classList.add('sc-fish');
-      const flat = flatWords(env.L);
-      const slots = [];
-      for (let j = 0; j < 7; j++) {
-        const el = mk('div', 'frow', root);
-        const ic = icons ? mk('span', 'ic', el) : null;
-        const tx = mk('span', 'tx', el);
-        slots.push({ el, ic, tx, i: -999, hot: false });
+      const glCanvas = mk('canvas', 'fish-gl', root);
+      const srcCanvas = document.createElement('canvas');
+      const sctx = srcCanvas.getContext('2d');
+
+      let gl = glCanvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: true });
+      let prog = null, buf = null, tex = null, uLoc = null;
+      if (gl) {
+        const compile = (type, src) => {
+          const sh = gl.createShader(type);
+          gl.shaderSource(sh, src);
+          gl.compileShader(sh);
+          if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) { gl.deleteShader(sh); return null; }
+          return sh;
+        };
+        const vs = compile(gl.VERTEX_SHADER, FISH_VS);
+        const fs = compile(gl.FRAGMENT_SHADER, FISH_FS);
+        if (vs && fs) {
+          prog = gl.createProgram();
+          gl.attachShader(prog, vs);
+          gl.attachShader(prog, fs);
+          gl.linkProgram(prog);
+          gl.deleteShader(vs);
+          gl.deleteShader(fs);
+          if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { gl.deleteProgram(prog); prog = null; }
+        }
+        if (prog) {
+          gl.useProgram(prog);
+          buf = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+          const aPos = gl.getAttribLocation(prog, 'aPos');
+          gl.enableVertexAttribArray(aPos);
+          gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+          tex = gl.createTexture();
+          gl.bindTexture(gl.TEXTURE_2D, tex);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+          gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+          uLoc = {
+            tex: gl.getUniformLocation(prog, 'uTex'),
+            zoom: gl.getUniformLocation(prog, 'uZoom'),
+            k1: gl.getUniformLocation(prog, 'uK1'),
+            k2: gl.getUniformLocation(prog, 'uK2'),
+            chroma: gl.getUniformLocation(prog, 'uChroma'),
+          };
+          gl.uniform1i(uLoc.tex, 0);
+        } else {
+          gl = null;
+        }
       }
+      const fbCtx = gl ? null : glCanvas.getContext('2d');
+
+      const nonEmpty = [];
+      const lineToSlot = new Map();
+      for (let i = 0; i < env.L.length; i++) {
+        if (env.L[i] && env.L[i].text) {
+          lineToSlot.set(i, nonEmpty.length);
+          nonEmpty.push({ idx: i, words: lineWords(env.L, i), t: env.L[i].t });
+        }
+      }
+
+      let cw = 0, ch = 0, scale = 1, lastNow = 0;
+      let scrollX = 0, scrollY = 0, placedX = false, placedY = false, lastSlot = -1;
+      let colTick = -999, cols = { c1: '#7c5cff', c2: '#ff4fa3', on: '#ffffff', off: 'rgba(255,255,255,0.42)', glow: 'rgba(124,92,255,0.55)' };
+      const layoutCache = new Map();
+      let cacheSig = '';
+
+      function refreshColors(now) {
+        if (now - colTick < 250) return;
+        colTick = now;
+        const st = getComputedStyle(document.documentElement);
+        cols.c1 = st.getPropertyValue('--c1').trim() || '#7c5cff';
+        cols.c2 = st.getPropertyValue('--c2').trim() || '#ff4fa3';
+        cols.on = st.getPropertyValue('--ly-on').trim() || '#ffffff';
+        cols.off = st.getPropertyValue('--ly-off').trim() || 'rgba(255,255,255,0.42)';
+        cols.glow = st.getPropertyValue('--glow').trim() || 'rgba(124,92,255,0.55)';
+      }
+
+      function measureSlot(slotIdx, fontSpec, fs) {
+        const key = slotIdx + '|' + fontSpec;
+        if (layoutCache.has(key)) return layoutCache.get(key);
+        const ws = nonEmpty[slotIdx].words;
+        sctx.font = fontSpec;
+        const spaceW = fs * 0.3;
+        const icGap = fs * 0.14;
+        const items = [];
+        let total = 0;
+        for (let k = 0; k < ws.length; k++) {
+          if (k > 0) total += spaceW;
+          const w = ws[k];
+          const tw = sctx.measureText(w.text).width;
+          const ic = icons ? iconFor(w.text) : '';
+          let iw = 0;
+          if (ic) {
+            sctx.font = `600 ${(fs * 0.8).toFixed(1)}px ${fontFor(env.S())}`;
+            iw = sctx.measureText(ic).width + icGap;
+            sctx.font = fontSpec;
+          }
+          const fullW = tw + iw;
+          items.push({ w, tw, ic, iw, icGap, fullW, x0: total, cx: total + fullW * 0.5 });
+          total += fullW;
+        }
+        const res = { items, total };
+        layoutCache.set(key, res);
+        return res;
+      }
+
+      function drawFallback2D(zoom, k1) {
+        if (!fbCtx) return;
+        fbCtx.clearRect(0, 0, cw, ch);
+        const strips = 36;
+        const sw = cw / strips;
+        for (let i = 0; i < strips; i++) {
+          const nx = ((i + 0.5) / strips) * 2 - 1;
+          const bend = zoom * (1 + k1 * nx * nx);
+          const dh = ch / Math.max(0.45, bend);
+          const dy = (ch - dh) * 0.5;
+          const alpha = clamp01(1 - Math.pow(Math.abs(nx), 2.4));
+          fbCtx.globalAlpha = alpha;
+          fbCtx.drawImage(srcCanvas, i * sw, 0, sw + 0.5, ch, i * sw, dy, sw + 0.5, dh);
+        }
+        fbCtx.globalAlpha = 1;
+      }
+
       return {
-        update(pos) {
-          const S = env.S(), H = env.H();
-          root.style.fontSize = Math.min(S.fontSize * 2, H * 0.26).toFixed(1) + 'px';
-          if (!flat.length) return;
-          let lo = 0, hi = flat.length - 1, k = -1;
-          while (lo <= hi) { const m = (lo + hi) >> 1; if (flat[m].start <= pos) { k = m; lo = m + 1; } else hi = m - 1; }
-          const f = k < 0 ? -1 : k - 1 + easeOutCubic(clamp01((pos - flat[k].start) / 260));
-          const base = Math.floor(f) - 2;
-          const K = H * 0.4;
-          for (let j = 0; j < slots.length; j++) {
-            const s = slots[j], wi = base + j, w = flat[wi];
-            if (s.i !== wi) {
-              s.i = wi;
-              if (w) {
-                s.tx.textContent = w.text;
-                if (s.ic) s.ic.textContent = iconFor(w.text);
+        update(pos, now, idx) {
+          const W = env.W(), H = env.H(), S = env.S();
+          const dpr = Math.min(window.devicePixelRatio || 1, 2);
+          scale = Math.min(dpr, 1280 / Math.max(W, H, 1));
+          const nw = Math.max(64, Math.round(W * scale));
+          const nh = Math.max(64, Math.round(H * scale));
+          if (nw !== cw || nh !== ch) {
+            cw = nw; ch = nh;
+            glCanvas.width = srcCanvas.width = cw;
+            glCanvas.height = srcCanvas.height = ch;
+            if (gl) gl.viewport(0, 0, cw, ch);
+          }
+
+          refreshColors(now);
+          sctx.clearRect(0, 0, cw, ch);
+          if (!nonEmpty.length) {
+            if (gl) { gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
+            else if (fbCtx) fbCtx.clearRect(0, 0, cw, ch);
+            return;
+          }
+
+          let curSlot = lineToSlot.has(idx) ? lineToSlot.get(idx) : -1;
+          if (curSlot < 0) {
+            for (let i = idx; i >= 0; i--) if (lineToSlot.has(i)) { curSlot = lineToSlot.get(i); break; }
+            if (curSlot < 0) curSlot = 0;
+          }
+
+          const fs = Math.max(16, Math.min(S.fontSize * scale * 1.15, ch * 0.145));
+          const lineStep = fs * 1.28;
+          const weight = S.bold ? 800 : 600;
+          const fontSpec = `${weight} ${fs.toFixed(1)}px ${fontFor(S)}`;
+          const newSig = `${S.font}|${weight}|${fs.toFixed(1)}|${icons ? 1 : 0}`;
+          if (newSig !== cacheSig) { cacheSig = newSig; layoutCache.clear(); }
+
+          const activeEntry = nonEmpty[curSlot];
+          const activeMeas = measureSlot(curSlot, fontSpec, fs);
+          let activeWi = 0;
+          for (let i = 0; i < activeEntry.words.length; i++) {
+            if (pos >= activeEntry.words[i].start) activeWi = i;
+          }
+          const activeItem = activeMeas.items[activeWi] || activeMeas.items[0];
+          const targetX = activeItem ? activeItem.cx - activeMeas.total * 0.5 : 0;
+          const targetY = curSlot * lineStep;
+
+          const dt = Math.min(0.1, Math.max(0, lastNow ? (now - lastNow) / 1000 : 0.016));
+          lastNow = now;
+          if (curSlot !== lastSlot) { lastSlot = curSlot; if (!placedX) scrollX = targetX; }
+          if (!placedY) { scrollY = targetY; placedY = true; }
+          else scrollY += (targetY - scrollY) * (1 - Math.exp(-dt * 9));
+          if (!placedX) { scrollX = targetX; placedX = true; }
+          else scrollX += (targetX - scrollX) * (1 - Math.exp(-dt * 11));
+
+          const hitAge = activeItem ? Math.max(0, pos - activeItem.w.start) : 999;
+          const wordHit = Math.exp(-hitAge / 150);
+          const beat = env.level();
+
+          sctx.save();
+          sctx.textBaseline = 'middle';
+          sctx.textAlign = 'left';
+          sctx.shadowColor = 'rgba(0,0,0,0.7)';
+          sctx.shadowBlur = 8 * scale;
+          sctx.shadowOffsetY = 2 * scale;
+
+          const nSlots = nonEmpty.length;
+          const wrapDemo = !!env.demo && nSlots > 1;
+          for (let d = -3; d <= 3; d++) {
+            let si = curSlot + d;
+            if (wrapDemo) si = ((si % nSlots) + nSlots) % nSlots;
+            else if (si < 0 || si >= nSlots) continue;
+
+            const meas = measureSlot(si, fontSpec, fs);
+            const y = ch * 0.5 + (curSlot + d) * lineStep - scrollY;
+            const dist = Math.abs(d);
+            const lineAlpha = [1, 0.72, 0.45, 0.24][dist] || 0.2;
+            const isCur = d === 0;
+            const lineX = cw * 0.5 - (isCur ? scrollX + meas.total * 0.5 : meas.total * 0.5);
+
+            for (let k = 0; k < meas.items.length; k++) {
+              const it = meas.items[k];
+              const isHot = isCur && k === activeWi;
+              const isSung = d < 0 || (isCur && k < activeWi);
+              const wScale = isHot ? 1.18 + 0.14 * wordHit : 1.0;
+              const cx = lineX + it.cx;
+
+              sctx.save();
+              sctx.translate(cx, y);
+              sctx.scale(wScale, wScale);
+              sctx.globalAlpha = lineAlpha;
+
+              if (isHot) {
+                const g = sctx.createLinearGradient(-it.fullW * 0.5, 0, it.fullW * 0.5, 0);
+                g.addColorStop(0, cols.c1);
+                g.addColorStop(1, cols.c2);
+                sctx.fillStyle = g;
+                sctx.shadowColor = cols.glow;
+                sctx.shadowBlur = (16 + 10 * beat) * scale;
+                sctx.shadowOffsetY = 0;
+              } else {
+                sctx.fillStyle = isSung ? cols.on : cols.off;
               }
+
+              sctx.font = fontSpec;
+              const startX = -it.fullW * 0.5;
+              sctx.fillText(it.w.text, startX, 0);
+              if (it.ic) {
+                sctx.font = `600 ${(fs * 0.8).toFixed(1)}px ${fontFor(S)}`;
+                sctx.fillText(it.ic, startX + it.tw + it.icGap, 0);
+              }
+              sctx.restore();
             }
-            if (!w) { s.el.style.opacity = 0; continue; }
-            const o = wi - f;
-            const a = Math.exp(-o * o * 0.5);
-            const y = K * Math.tanh(o * 0.95);
-            const sc = 0.38 + 0.62 * Math.exp(-o * o * 0.9);
-            s.el.style.opacity = a < 0.04 ? 0 : a.toFixed(3);
-            s.el.style.transform = `translateY(${y.toFixed(1)}px) perspective(520px) rotateX(${(-o * 34).toFixed(1)}deg) scale(${sc.toFixed(3)})`;
-            const hot = Math.abs(o) < 0.45;
-            if (hot !== s.hot) { s.hot = hot; s.el.classList.toggle('hot', hot); }
+          }
+          sctx.restore();
+
+          const zoom = Math.max(0.42, 0.48 - 0.03 * wordHit - 0.02 * beat);
+          const k1 = 0.92 + 0.12 * beat;
+          const k2 = 0.32;
+          const chroma = 0.03 + 0.015 * beat;
+
+          if (gl && prog) {
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, srcCanvas);
+            gl.uniform1f(uLoc.zoom, zoom);
+            gl.uniform1f(uLoc.k1, k1);
+            gl.uniform1f(uLoc.k2, k2);
+            gl.uniform1f(uLoc.chroma, chroma);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+          } else {
+            drawFallback2D(zoom, k1);
+          }
+        },
+        destroy() {
+          if (gl) {
+            if (tex) gl.deleteTexture(tex);
+            if (buf) gl.deleteBuffer(buf);
+            if (prog) gl.deleteProgram(prog);
+            const ext = gl.getExtension('WEBGL_lose_context');
+            if (ext) ext.loseContext();
+            gl = null;
           }
         },
       };
@@ -585,46 +850,145 @@
   const nativeSize = (S, lo, hi, k) => Math.max(lo, Math.min(hi, S.fontSize * k));
   const theme = (root, S) => { const d = S.nativeTheme !== 'light'; if (root.classList.contains('dark') !== d) root.classList.toggle('dark', d); };
 
-  // Messages: a bubble for every line
+  // Messages: a bubble for every line, filling all the way to the top with realistic 1-3 message bursts
   SC.chat = (root, env) => {
     root.classList.add('sc-native', 'sc-chat');
     const head = mk('div', 'chead', root);
     const av = mk('div', 'cav', head, '♪');
     const name = mk('div', 'cname', head);
     const thread = mk('div', 'cthread', root);
-    const typing = mk('div', 'bub in typing', thread);
+    const typing = mk('div', 'bub in tail typing', thread);
     for (let k = 0; k < 3; k++) mk('i', '', typing);
     typing.style.display = 'none';
-    const els = new Map();
-    let curIdx = -9, lastName = '';
-    const side = (i) => (i % 2 ? 'out' : 'in');
-    function add(i, animate) {
-      const b = mk('div', 'bub ' + side(i), null, env.L[i].text);
-      thread.insertBefore(b, typing);
-      els.set(i, b);
-      if (animate) { b.classList.add('pre'); requestAnimationFrame(() => requestAnimationFrame(() => b.classList.remove('pre'))); }
+
+    // Deterministic seeded burst sequence (62% 1-msg, 26% 2-msg, 12% 3-msg bursts)
+    let seed = (env.L.length * 2654435761 + 17) >>> 0;
+    for (let i = 0; i < Math.min(env.L.length, 12); i++) {
+      const t = (env.L[i] && env.L[i].text) || '';
+      for (let k = 0; k < Math.min(t.length, 16); k++) seed = (Math.imul(seed, 31) + t.charCodeAt(k)) >>> 0;
     }
+    const rand = rng(seed);
+    const sides = new Array(env.L.length);
+    let curSide = 'out';
+    let rem = 0;
+    for (let i = 0; i < env.L.length; i++) {
+      if (!env.L[i] || !env.L[i].text) { sides[i] = curSide; continue; }
+      if (rem <= 0) {
+        const u = rand();
+        rem = u < 0.62 ? 1 : u < 0.88 ? 2 : 3;
+        curSide = curSide === 'in' ? 'out' : 'in';
+      }
+      sides[i] = curSide;
+      rem--;
+    }
+    const side = (i) => sides[i] || 'in';
+
+    const els = new Map();
+    const shown = []; // rendered lyric indices in ascending order
+    let curIdx = -9, lastName = '', lastSig = '', lastTypingSig = '';
+
+    function makeBub(i, beforeEl, animate) {
+      const b = mk('div', 'bub ' + side(i), null, env.L[i].text);
+      thread.insertBefore(b, beforeEl);
+      els.set(i, b);
+      if (animate) {
+        b.classList.add('pre');
+        requestAnimationFrame(() => requestAnimationFrame(() => b.classList.remove('pre')));
+      }
+      return b;
+    }
+
+    function fillAndPrune(fs, maxIdx) {
+      const availH = thread.clientHeight || Math.max(80, env.H() - (head.offsetHeight || fs * 4.5));
+      const gap = parseFloat(getComputedStyle(thread).rowGap || getComputedStyle(thread).gap) || 0;
+      const targetH = availH + 96;
+      let usedH = 0;
+      for (let p = 0; p < shown.length; p++) {
+        usedH += els.get(shown[p]).offsetHeight + (p > 0 ? gap : 0);
+      }
+
+      // Backfill older lines up to the top of the thread container
+      let scan = shown.length ? shown[0] - 1 : Math.min(maxIdx, env.L.length - 1);
+      while (scan >= 0 && usedH < targetH && shown.length < 60) {
+        if (env.L[scan] && env.L[scan].text) {
+          const anchor = shown.length ? els.get(shown[0]) : typing;
+          const b = makeBub(scan, anchor, false);
+          shown.unshift(scan);
+          usedH += b.offsetHeight + (shown.length > 1 ? gap : 0);
+        }
+        scan--;
+      }
+
+      // Trim far-offscreen top bubbles to keep DOM lean
+      while (shown.length > 2) {
+        const oldestIdx = shown[0];
+        const oldest = els.get(oldestIdx);
+        const dropH = oldest.offsetHeight + gap;
+        if (usedH - dropH > availH + 160) {
+          shown.shift();
+          oldest.remove();
+          els.delete(oldestIdx);
+          usedH -= dropH;
+        } else {
+          break;
+        }
+      }
+    }
+
+    function applyGrouping(showTyping, nxtSide) {
+      for (let p = 0; p < shown.length; p++) {
+        const i = shown[p], b = els.get(i), s = side(i);
+        const prevSame = p > 0 && side(shown[p - 1]) === s;
+        const nextSame = p < shown.length - 1 ? side(shown[p + 1]) === s : (showTyping && nxtSide === s);
+        b.classList.toggle('same', prevSame);
+        b.classList.toggle('tail', !nextSame);
+      }
+    }
+
     return {
       update(pos, now, idx) {
         const S = env.S(), m = env.media();
         theme(root, S);
         const nm = (m && m.artist) || 'Halo';
         if (nm !== lastName) { lastName = nm; name.textContent = nm; av.textContent = nm.trim().charAt(0).toUpperCase() || '♪'; }
-        root.style.fontSize = nativeSize(S, 13, 26, 0.5).toFixed(1) + 'px';
-        if (idx !== curIdx) {
-          const inc = idx === curIdx + 1;
-          if (!inc) { for (const b of els.values()) b.remove(); els.clear(); }
-          const list = [];
-          for (let i = idx; i >= 0 && list.length < 7; i--) if (env.L[i] && env.L[i].text) list.unshift(i);
-          for (const [i, b] of els) if (!list.includes(i)) { b.remove(); els.delete(i); }
-          for (const i of list) if (!els.has(i)) add(i, inc);
-          curIdx = idx;
-        }
+        const fs = nativeSize(S, 13, 26, 0.5);
+        root.style.fontSize = fs.toFixed(1) + 'px';
+
         let nxt = -1;
-        for (let j = idx + 1; j < env.L.length && j < idx + 4; j++) if (env.L[j].text) { nxt = j; break; }
-        const show = nxt >= 0 && pos > env.L[nxt].t - 1100;
-        typing.style.display = show ? '' : 'none';
-        if (show) typing.className = 'bub typing ' + side(nxt);
+        for (let j = idx + 1; j < env.L.length && j < idx + 4; j++) if (env.L[j] && env.L[j].text) { nxt = j; break; }
+        const showTyping = nxt >= 0 && pos > env.L[nxt].t - 1100;
+        const nxtSide = nxt >= 0 ? side(nxt) : 'in';
+        const typingSig = showTyping ? nxtSide : '';
+        const typingChanged = typingSig !== lastTypingSig;
+        if (typingChanged) {
+          lastTypingSig = typingSig;
+          typing.style.display = showTyping ? '' : 'none';
+          if (showTyping) typing.className = 'bub typing tail ' + nxtSide;
+        }
+
+        const sig = `${idx}|${env.W()}|${env.H()}|${fs.toFixed(1)}`;
+        if (idx !== curIdx || sig !== lastSig) {
+          const inc = idx !== curIdx && curIdx >= -1 && idx > curIdx && idx - curIdx <= 3;
+          if (idx !== curIdx && !inc) {
+            for (const b of els.values()) b.remove();
+            els.clear();
+            shown.length = 0;
+          }
+          if (inc) {
+            for (let i = curIdx + 1; i <= idx; i++) {
+              if (env.L[i] && env.L[i].text && !els.has(i)) {
+                makeBub(i, typing, true);
+                shown.push(i);
+              }
+            }
+          }
+          curIdx = idx;
+          lastSig = sig;
+          if (idx >= 0) fillAndPrune(fs, idx);
+          applyGrouping(showTyping, nxtSide);
+        } else if (typingChanged) {
+          applyGrouping(showTyping, nxtSide);
+        }
       },
     };
   };

@@ -801,6 +801,7 @@ let scene = null, sceneKey = '', sceneL = null;
 const NATIVE = new Set(['chat', 'money', 'map', 'notify', 'code', 'codeVisual']);
 function ensureScene(L, style, demo) {
   if (scene && sceneL === L && sceneKey === style) return;
+  if (scene && scene.destroy) scene.destroy();
   sceneEl.textContent = '';
   sceneEl.className = '';
   sceneEl.removeAttribute('style');
@@ -816,8 +817,12 @@ function ensureScene(L, style, demo) {
 function setMode(isScene) {
   trackEl.style.display = isScene ? 'none' : '';
   sceneEl.style.display = isScene ? '' : 'none';
-  if (!isScene) { scene = null; sceneKey = ''; stageEl.classList.remove('isScene'); }
-  else { listL = null; }
+  if (!isScene) {
+    if (scene && scene.destroy) scene.destroy();
+    scene = null; sceneKey = ''; stageEl.classList.remove('isScene');
+  } else {
+    listL = null;
+  }
 }
 
 let lastRaw = 0;

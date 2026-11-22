@@ -34,9 +34,9 @@ const STYLE_DEFS = [
   { id: 'spotlight', group: 'Lyric lines', name: 'Spotlight', desc: 'One big word at a time, the line small underneath.', rec: [760, 240] },
 
   { id: 'ship', group: 'Kinetic type', name: 'Ship', desc: 'Words land one by one on a wall that drifts in 3D.', rec: [760, 300] },
-  { id: 'fisheye', group: 'Kinetic type', name: 'Fisheye', desc: 'A tight stack of three words, bulging through a lens.', rec: [720, 290] },
+  { id: 'fisheye', group: 'Kinetic type', name: 'Fisheye', desc: 'Lyrics warped through a bulging spherical fisheye lens.', rec: [680, 380] },
   { id: 'visual', group: 'Kinetic type', name: 'Visual', desc: 'A centred stack, with an icon for every word that has one.', rec: [640, 300] },
-  { id: 'fisheyeVisual', group: 'Kinetic type', name: 'Fisheye Visual', desc: 'Fisheye, with icons beside the words that have one.', rec: [720, 290] },
+  { id: 'fisheyeVisual', group: 'Kinetic type', name: 'Fisheye Visual', desc: 'Fisheye lens, with icons beside the words that have one.', rec: [680, 380] },
 
   { id: 'code', group: 'Motion scenes', name: 'Code', desc: 'The lyric typed out as code, under a blinking red cursor.', rec: [720, 250] },
   { id: 'codeVisual', group: 'Motion scenes', name: 'Code Visual', desc: 'Code, with icons beside the words that have one.', rec: [720, 250] },
