@@ -1,0 +1,72 @@
+{
+  "name": "halo-overlay",
+  "productName": "Halo",
+  "version": "6.2.0",
+  "description": "Music-reactive screen-edge glow, synced lyrics and a spinning record overlay for Windows",
+  "author": "Halo",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.halo.overlay",
+    "productName": "Halo",
+    "copyright": "Halo",
+    "artifactName": "Halo-Setup-${version}.exe",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "settings-preload.js",
+      "overlay.html",
+      "renderer.js",
+      "scenes.js",
+      "settings.html",
+      "settings.js",
+      "build/icon.png",
+      "build/logo.png",
+      "fonts/GoogleSans.ttf"
+    ],
+    "extraResources": [
+      "media.ps1",
+      "zorder.ps1"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": true
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Halo",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arvgdhi/HaloVisual.git"
+  }
+}
