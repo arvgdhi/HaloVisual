@@ -50,6 +50,14 @@ const STYLE_DEFS = [
   { id: 'notify', group: 'Native design', name: 'Notifications', desc: 'Lines arrive as lock-screen notifications, stacks and widgets.', rec: [520, 350] },
 ];
 const styleDef = (id) => STYLE_DEFS.find((s) => s.id === id);
+const DISC_STYLES = [
+  { id: 'vinyl', name: 'Classic Vinyl', desc: 'Dark grooved LP with the album cover as its centre label and a tonearm.' },
+  { id: 'picture', name: 'Picture Disc', desc: 'Full-bleed album art pressed across the entire spinning vinyl surface.' },
+  { id: 'neon', name: 'Neon Acrylic', desc: 'Translucent glowing vinyl tinted with your active accent colours.' },
+  { id: 'cd', name: 'Holographic CD', desc: 'Compact disc with iridescent prism reflections and a clear inner hub.' },
+  { id: 'turntable', name: 'Turntable Deck', desc: 'Minimalist dark plinth deck with a glowing strobe dot and tonearm.' },
+  { id: 'sleeve', name: 'Album Sleeve', desc: 'Rounded album cover sleeve with the spinning vinyl record sliding out.' },
+];
 const LYRIC_COLORS = [
   ['White', 'white'], ['Match album art', 'album'], ['Pink', '#ff6bb5'], ['Cyan', '#4fe3ff'],
   ['Yellow', '#ffe14f'], ['Green', '#62f08c'], ['Orange', '#ff9a3c'], ['Violet', '#a98bff'],
@@ -96,26 +104,48 @@ const DEFAULTS = {
   musicOnly: true,         // ignore browser videos like Reels/Shorts unless they look like music
   glowDisplays: null,      // null = every screen, otherwise an array of display ids
   showDisc: true,
+  discStyle: 'vinyl',
   discSize: 200,
   discRot: 0,
   lyricG: null,            // global desktop position (DIP) of the lyric box centre, null = default
   discG: null,             // same for the record
   startWithWindows: false,
+  autoUpdate: true,
+  installedAssetId: null,
   settingsShown: false,
+  pauseFullscreen: true,
+  pauseMaximized: true,
+  batteryMode: 'eco',      // 'off' | 'eco' | 'pause'
+  fpsCap: 60,              // 0 (native) | 20 | 30 | 60
+  glowQuality: 'medium',   // 'low' | 'medium' | 'high'
+  reducedEffects: false,
+  audioReactive: true,
+  startMinimized: false,
 };
 let settings = { ...DEFAULTS };
 let editMode = false;
-let firstRun = true;
+let manualPaused = false;
+let systemLocked = false;
+let onBattery = false;
+let occludedFs = new Set();
+let occludedMax = new Set();
+let mediaIdleSent = null;
+let lastRuntimeSig = '';
+let lastAudioOwner = null;
+let lastZConfig = '';
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 
 function loadSettings() {
   try {
     const saved = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
-    firstRun = false;
     settings = { ...DEFAULTS, ...saved };
     if (typeof saved.futureLines !== 'number' && saved.showNext === false) settings.futureLines = 0; // from older versions
     if (typeof saved.bold !== 'boolean' && typeof saved.fontWeight === 'number') settings.bold = saved.fontWeight >= 600;
     if (!styleDef(settings.lyricStyle)) settings.lyricStyle = 'classic';
+    if (!DISC_STYLES.some((s) => s.id === settings.discStyle)) settings.discStyle = 'vinyl';
+    if (!['off', 'eco', 'pause'].includes(settings.batteryMode)) settings.batteryMode = 'eco';
+    if (!['low', 'medium', 'high'].includes(settings.glowQuality)) settings.glowQuality = 'medium';
+    if (![0, 20, 30, 60].includes(settings.fpsCap)) settings.fpsCap = 60;
   } catch { /* first run */ }
 }
 let saveTimer = null;
@@ -173,9 +203,92 @@ function broadcast(channel, data) {
 let audioRetryTimer = null;
 let lastAudioTriggerAt = 0;
 
-function needsAudio(win) {
-  return !!(win && !win.isDestroyed() && ((settings.glow && glowOn(win.displayId)) || settings.lyricStyle === 'beat'));
+function effectivePerf() {
+  const ecoActive = !!(onBattery && settings.batteryMode === 'eco');
+  const fpsCap = ecoActive
+    ? (settings.fpsCap === 0 ? 30 : Math.min(settings.fpsCap, 30))
+    : settings.fpsCap;
+  const glowQuality = ecoActive ? 'low' : settings.glowQuality;
+  const reducedEffects = !!(settings.reducedEffects || ecoActive);
+  return { fpsCap, glowQuality, reducedEffects, ecoActive, onBattery };
 }
+
+function rectsIntersect(a, b) {
+  return a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+}
+
+function displayHasContent(win) {
+  if (editMode) return true;
+  if (!win || win.isDestroyed()) return false;
+  if (settings.glow && glowOn(win.displayId)) return true;
+  const disp = screen.getAllDisplays().find((d) => d.id === win.displayId);
+  if (!disp) return true;
+  const db = {
+    x1: disp.bounds.x,
+    y1: disp.bounds.y,
+    x2: disp.bounds.x + disp.bounds.width,
+    y2: disp.bounds.y + disp.bounds.height,
+  };
+  if (settings.lyrics) {
+    const lp = effPos(settings.lyricG, 0.5, 0.84);
+    const r = Math.hypot(settings.lyricW, settings.lyricH) / 2 + 80;
+    if (rectsIntersect({ x1: lp.x - r, y1: lp.y - r, x2: lp.x + r, y2: lp.y + r }, db)) return true;
+  }
+  if (settings.showDisc) {
+    const dp = effPos(settings.discG, 0.11, 0.76);
+    const r = settings.discSize * 0.7 + 80;
+    if (rectsIntersect({ x1: dp.x - r, y1: dp.y - r, x2: dp.x + r, y2: dp.y + r }, db)) return true;
+  }
+  return false;
+}
+
+function pauseReasonFor(win) {
+  if (editMode) return null;
+  if (manualPaused) return 'manual';
+  if (systemLocked) return 'locked';
+  if (onBattery && settings.batteryMode === 'pause') return 'battery';
+  if (settings.pauseFullscreen && occludedFs.has(win.displayId)) return 'fullscreen';
+  if (settings.layer === 'desktop' && settings.pauseMaximized && occludedMax.has(win.displayId)) return 'maximized';
+  if (!displayHasContent(win)) return 'empty';
+  return null;
+}
+
+function needsAudio(win) {
+  return !!(
+    win &&
+    !win.isDestroyed() &&
+    !win.paused &&
+    settings.audioReactive &&
+    ((settings.glow && glowOn(win.displayId)) || (settings.lyrics && settings.lyricStyle === 'beat'))
+  );
+}
+function needsArt() {
+  return !!(settings.showDisc || settings.useAlbum || settings.lyricColor === 'album');
+}
+function runtimeObj() {
+  const live = liveOverlays();
+  const totalCount = live.length;
+  let activeCount = 0;
+  const pauseReasons = [];
+  for (const w of live) {
+    if (w.paused) {
+      if (w.pauseReason && !pauseReasons.includes(w.pauseReason)) pauseReasons.push(w.pauseReason);
+    } else {
+      activeCount++;
+    }
+  }
+  const perf = effectivePerf();
+  return {
+    manualPaused,
+    onBattery,
+    ecoActive: perf.ecoActive,
+    allPaused: totalCount > 0 ? activeCount === 0 : (manualPaused || systemLocked || (onBattery && settings.batteryMode === 'pause')),
+    activeCount,
+    totalCount,
+    pauseReasons,
+  };
+}
+
 function audioOwnerWin() {
   const live = liveOverlays().filter(needsAudio);
   if (!live.length) return null;
@@ -190,15 +303,17 @@ function triggerAudio(win, forceRestart = false) {
     .catch(() => {});
 }
 
-function sendSettings(win) {
+function sendSettings(win, owner = audioOwnerWin()) {
   if (win.isDestroyed()) return;
   const id = win.displayId;
   const disp = screen.getAllDisplays().find((d) => d.id === id) || screen.getPrimaryDisplay();
   const live = liveOverlays();
-  const owner = audioOwnerWin();
   const isOwner = owner === win;
   win.webContents.send('settings', {
     ...settings,
+    paused: !!win.paused,
+    pauseReason: win.pauseReason || null,
+    perf: effectivePerf(),
     here: {
       glow: glowOn(id),
       primary: id === screen.getPrimaryDisplay().id,
@@ -206,23 +321,16 @@ function sendSettings(win) {
       multiScreen: live.length > 1,
     },
     editMode,
-    preview: settingsVisible(),
+    preview: false,
     origin: { x: disp.bounds.x, y: disp.bounds.y }, // this window's top-left in global desktop coordinates
     virt: virtualBounds(),
     lyricPos: effPos(settings.lyricG, 0.5, 0.84),
     discPos: effPos(settings.discG, 0.11, 0.76),
   });
-  if (isOwner) triggerAudio(win, false);
-  else win.webContents.executeJavaScript('typeof stopAudio==="function"&&stopAudio()', false).catch(() => {});
-}
-function broadcastSettings() { for (const w of liveOverlays()) sendSettings(w); }
-
-function settingsVisible() {
-  return !!(settingsWin && !settingsWin.isDestroyed() && settingsWin.isVisible() && !settingsWin.isMinimized());
 }
 
 let lastTop = null;
-function applyLayerFlags() {
+function applyLayerFlags(nudge = false) {
   const top = editMode || settings.layer === 'top';
   if (top !== lastTop) {
     lastTop = top;
@@ -231,7 +339,63 @@ function applyLayerFlags() {
       else w.setAlwaysOnTop(false);
     }
   }
-  applyZ();
+  applyZ(nudge);
+}
+
+function reconcileOverlays(forceSettings = false) {
+  const live = liveOverlays();
+  const changes = new Map();
+  for (const win of live) {
+    const reason = pauseReasonFor(win);
+    const nextPaused = !!reason;
+    const prevPaused = !!win.paused;
+    const stateChanged = nextPaused !== prevPaused || reason !== (win.pauseReason || null);
+    const becamePaused = nextPaused && !prevPaused;
+    const becameActive = !nextPaused && prevPaused;
+    win.paused = nextPaused;
+    win.pauseReason = reason;
+    changes.set(win, { stateChanged, becamePaused, becameActive });
+  }
+
+  const curOwner = audioOwnerWin();
+  const ownerChanged = curOwner !== lastAudioOwner;
+  lastAudioOwner = curOwner;
+
+  let anyBecameActive = false;
+  for (const win of live) {
+    const c = changes.get(win);
+    if (c.becamePaused) {
+      sendSettings(win, curOwner);
+      if (!win.isDestroyed()) win.hide();
+    } else if (c.becameActive) {
+      if (!win.isDestroyed()) win.showInactive();
+      sendSettings(win, curOwner);
+      anyBecameActive = true;
+    } else if (forceSettings || ownerChanged || c.stateChanged) {
+      sendSettings(win, curOwner);
+    }
+
+    if (win === curOwner) {
+      if (forceSettings || ownerChanged || c.becameActive) triggerAudio(win, false);
+    } else if (forceSettings || ownerChanged || c.becamePaused) {
+      win.webContents.executeJavaScript('typeof stopAudio==="function"&&stopAudio()', false).catch(() => {});
+    }
+  }
+
+  if (anyBecameActive) applyLayerFlags(true);
+
+  const rt = runtimeObj();
+  if (mediaProc && mediaProc.stdin.writable && rt.allPaused !== mediaIdleSent) {
+    mediaIdleSent = rt.allPaused;
+    try { mediaProc.stdin.write(rt.allPaused ? 'idle:1\n' : 'idle:0\n'); } catch { /* ignore */ }
+  }
+
+  const sig = JSON.stringify(rt);
+  if (sig !== lastRuntimeSig) {
+    lastRuntimeSig = sig;
+    sendState();
+    scheduleTray();
+  }
 }
 
 function createOverlay(display) {
@@ -253,20 +417,28 @@ function createOverlay(display) {
       preload: path.join(__dirname, 'preload.js'),
       backgroundThrottling: false,
       autoplayPolicy: 'no-user-gesture-required',
+      spellcheck: false,
     },
   });
   win.displayId = display.id;
+  win.paused = false;
+  win.pauseReason = null;
   win.webContents.on('console-message', (_e, _lvl, msg) => console.log('[overlay]', msg));
   win.setIgnoreMouseEvents(true);
   win.loadFile(path.join(__dirname, 'overlay.html'));
   win.webContents.once('did-finish-load', () => {
-    win.showInactive();
-    sendSettings(win);
+    if (win.isDestroyed()) return;
+    const reason = pauseReasonFor(win);
+    win.paused = !!reason;
+    win.pauseReason = reason;
+    if (!win.paused) win.showInactive();
     if (lastMedia) win.webContents.send('media', lastMedia);
     if (lastArt) win.webContents.send('art', lastArt);
     win.webContents.send('lyrics', lastLyrics);
     lastTop = null;
-    applyLayerFlags();
+    applyLayerFlags(true);
+    reconcileOverlays(true);
+    applyZ(true);
   });
   return win;
 }
@@ -274,6 +446,8 @@ function createOverlay(display) {
 function createOverlays() {
   clearTimeout(audioRetryTimer);
   audioRetryTimer = null;
+  lastAudioOwner = null;
+  lastTop = null;
   for (const w of liveOverlays()) w.destroy();
   overlays = screen.getAllDisplays().map(createOverlay);
 }
@@ -285,18 +459,47 @@ function startZorder() {
     ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath('zorder.ps1')],
     { windowsHide: true });
   ps.stdin.on('error', () => {});
+  readline.createInterface({ input: ps.stdout }).on('line', (line) => {
+    if (!line.startsWith('occ:')) return;
+    try {
+      const data = JSON.parse(line.slice(4));
+      occludedFs = new Set(Array.isArray(data.fs) ? data.fs.map(Number) : []);
+      occludedMax = new Set(Array.isArray(data.max) ? data.max.map(Number) : []);
+      reconcileOverlays(false);
+    } catch (e) {
+      console.log('[zorder parse error]', e.message);
+    }
+  });
   readline.createInterface({ input: ps.stderr }).on('line', (l) => console.log('[zorder error]', l));
-  ps.on('exit', () => { zproc = null; if (!quitting) setTimeout(startZorder, 3000); });
+  ps.on('exit', () => { zproc = null; lastZConfig = ''; if (!quitting) setTimeout(startZorder, 3000); });
   zproc = ps;
+  lastZConfig = '';
+  try { ps.stdin.write(`pid:${process.pid}\n`); } catch { /* ignore */ }
+  applyZ(true);
 }
-function applyZ() {
+function applyZ(nudge = false) {
   if (!zproc || !zproc.stdin.writable) return;
   const mode = editMode || settings.layer === 'top' ? 'top' : 'bottom';
-  const handles = liveOverlays().map((w) => {
+  const watchFs = !editMode && settings.pauseFullscreen ? '1' : '0';
+  const watchMax = !editMode && settings.layer === 'desktop' && settings.pauseMaximized ? '1' : '0';
+  const displays = screen.getAllDisplays();
+  const entries = [];
+  for (const w of liveOverlays()) {
     const h = w.getNativeWindowHandle();
-    return (h.length >= 8 ? h.readBigUInt64LE(0) : BigInt(h.readUInt32LE(0))).toString();
-  });
-  if (handles.length) zproc.stdin.write(`${mode}:${handles.join(',')}\n`);
+    const hwnd = (h.length >= 8 ? h.readBigUInt64LE(0) : BigInt(h.readUInt32LE(0))).toString();
+    const disp = displays.find((d) => d.id === w.displayId);
+    const b = disp ? disp.bounds : w.getBounds();
+    const centerDip = { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };
+    const pt = screen.dipToScreenPoint ? screen.dipToScreenPoint(centerDip) : centerDip;
+    entries.push(`${w.displayId}=${hwnd}=${Math.round(pt.x)}=${Math.round(pt.y)}`);
+  }
+  const cfg = `config:${mode}|${watchFs}|${watchMax}|${entries.join(',')}`;
+  if (cfg !== lastZConfig) {
+    lastZConfig = cfg;
+    try { zproc.stdin.write(cfg + '\n'); } catch { /* ignore */ }
+  } else if (nudge) {
+    try { zproc.stdin.write('nudge\n'); } catch { /* ignore */ }
+  }
 }
 
 // ---------- on-screen layout editing ----------
@@ -311,8 +514,8 @@ function setEdit(on) {
     win.setIgnoreMouseEvents(true, on ? { forward: true } : undefined);
   }
   if (settingsWin && !settingsWin.isDestroyed()) settingsWin.setAlwaysOnTop(on, 'screen-saver');
-  applyLayerFlags();
-  broadcastSettings();
+  applyLayerFlags(true);
+  reconcileOverlays(true);
   sendState();
   scheduleTray();
   if (on) editTimer = setTimeout(() => setEdit(false), 20 * 60 * 1000); // safety: auto-exit
@@ -355,7 +558,11 @@ const NUM = {
   lyricRot: [-180, 180, 0], discRot: [-180, 180, 0], lyricW: [120, 3000, 0], lyricH: [40, 1500, 0],
   pastLines: [0, 8, 0], futureLines: [0, 8, 0], offsetMs: [-8000, 8000, 0], fadeSec: [0, 300, 0],
 };
-const BOOL = ['glow', 'lyrics', 'showDisc', 'idleGlow', 'rainbow', 'useAlbum', 'lineBlur', 'bold', 'startWithWindows', 'musicOnly'];
+const BOOL = [
+  'glow', 'lyrics', 'showDisc', 'idleGlow', 'rainbow', 'useAlbum', 'lineBlur', 'bold',
+  'startWithWindows', 'musicOnly', 'autoUpdate',
+  'pauseFullscreen', 'pauseMaximized', 'reducedEffects', 'audioReactive', 'startMinimized',
+];
 
 function sanitize(d) {
   const patch = {};
@@ -368,10 +575,14 @@ function sanitize(d) {
   }
   for (const k of BOOL) if (typeof d[k] === 'boolean') patch[k] = d[k];
   if (styleDef(d.lyricStyle)) patch.lyricStyle = d.lyricStyle;
+  if (DISC_STYLES.some((s) => s.id === d.discStyle)) patch.discStyle = d.discStyle;
   if (SHAPES.some(([id]) => id === d.shape)) patch.shape = d.shape;
   if (['left', 'center', 'right'].includes(d.lyricAlign)) patch.lyricAlign = d.lyricAlign;
   if (d.nativeTheme === 'dark' || d.nativeTheme === 'light') patch.nativeTheme = d.nativeTheme;
   if (d.layer === 'desktop' || d.layer === 'top') patch.layer = d.layer;
+  if (['off', 'eco', 'pause'].includes(d.batteryMode)) patch.batteryMode = d.batteryMode;
+  if (['low', 'medium', 'high'].includes(d.glowQuality)) patch.glowQuality = d.glowQuality;
+  if ([0, 20, 30, 60].includes(d.fpsCap)) patch.fpsCap = d.fpsCap;
   if (d.lyricColor === 'white' || d.lyricColor === 'album' || HEX.test(d.lyricColor || '')) patch.lyricColor = d.lyricColor;
   if (typeof d.font === 'string') {
     const f = d.font.replace(/['"\\;{}<>\r\n]/g, '').trim().slice(0, 80); // any installed font name
@@ -399,16 +610,188 @@ function sanitize(d) {
 
 function commit(patch) {
   if (!patch || !Object.keys(patch).length) return;
+  const hadArt = needsArt();
   settings = { ...settings, ...patch };
   if ('startWithWindows' in patch && app.isPackaged) app.setLoginItemSettings({ openAtLogin: !!patch.startWithWindows });
   scheduleSave();
   applyLayerFlags();
-  broadcastSettings();
+  reconcileOverlays(true);
   if ('musicOnly' in patch) applySessions(lastSessions);
+  if (!hadArt && needsArt() && currentKey && !lastArt && lastMedia && !lastMedia.none) {
+    if (lastMedia.hasThumb && thumbRequestedFor !== currentKey && mediaProc && mediaProc.stdin.writable) {
+      thumbRequestedFor = currentKey;
+      try { mediaProc.stdin.write(`thumb:${currentKey}\n`); } catch { /* ignore */ }
+    } else {
+      const token = ++artToken;
+      setTimeout(() => { if (token === artToken && !lastArt) fetchArtFallback(lastMedia, token); }, 800);
+    }
+  }
   sendState();
   scheduleTray();
 }
 ipcMain.on('prefs', (_e, d) => commit(sanitize(d)));
+
+// ---------- GitHub auto-updater ----------
+let updateState = {
+  status: 'idle',
+  version: null,
+  releaseName: null,
+  progress: 0,
+  error: null,
+  installerPath: null,
+  assetId: null,
+  assetUrl: null,
+  assetName: null,
+};
+
+function cmpVer(a, b) {
+  const pa = String(a || '').replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '').replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
+async function checkForUpdates(manual = false) {
+  if (updateState.status === 'checking' || updateState.status === 'downloading') return;
+  const prevReady = updateState.status === 'ready' && updateState.installerPath && fs.existsSync(updateState.installerPath) ? { ...updateState } : null;
+  updateState = { ...updateState, status: 'checking', error: null };
+  sendState();
+  try {
+    const r = await fetch('https://api.github.com/repos/arvgdhi/HaloVisual/releases', {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Halo/${app.getVersion()}` },
+    });
+    if (!r.ok) throw new Error(`GitHub HTTP ${r.status}`);
+    const releases = await r.json();
+    const candidates = [];
+    for (const rel of Array.isArray(releases) ? releases : []) {
+      if (!rel || rel.draft) continue;
+      const asset = (rel.assets || []).find((a) => a && /^Halo-Setup-.*\.exe$/i.test(a.name));
+      if (!asset || !asset.browser_download_url) continue;
+      const tagVer = String(rel.tag_name || '').replace(/^v/i, '');
+      const nameVer = asset.name.match(/Halo-Setup-(.+?)\.exe$/i);
+      const ver = /^\d+\.\d+/.test(tagVer) ? tagVer : (nameVer ? nameVer[1] : app.getVersion());
+      candidates.push({ rel, asset, ver });
+    }
+    candidates.sort((a, b) => {
+      const vd = cmpVer(b.ver, a.ver);
+      if (vd !== 0) return vd;
+      return Date.parse(b.asset.updated_at || 0) - Date.parse(a.asset.updated_at || 0);
+    });
+
+    const best = candidates[0];
+    let localMtime = 0;
+    try { localMtime = fs.statSync(process.execPath).mtimeMs; } catch { /* ignore */ }
+    const isNewer = best && (
+      cmpVer(best.ver, app.getVersion()) > 0 ||
+      (best.rel.tag_name === 'latest' && app.isPackaged && best.asset.id !== settings.installedAssetId && Date.parse(best.asset.updated_at || 0) > localMtime + 60000)
+    );
+
+    if (!isNewer) {
+      updateState = {
+        status: 'up-to-date', version: app.getVersion(), releaseName: null, progress: 0, error: null,
+        installerPath: null, assetId: null, assetUrl: null, assetName: null,
+      };
+      sendState();
+      return;
+    }
+
+    if (prevReady && prevReady.assetId === best.asset.id) {
+      updateState = prevReady;
+      sendState();
+      return;
+    }
+
+    updateState = {
+      status: 'available',
+      version: best.ver,
+      releaseName: best.rel.name || best.rel.tag_name || `v${best.ver}`,
+      progress: 0,
+      error: null,
+      installerPath: null,
+      assetId: best.asset.id,
+      assetUrl: best.asset.browser_download_url,
+      assetName: best.asset.name,
+    };
+    console.log('[update] available:', updateState.releaseName, updateState.assetName);
+    sendState();
+    if (settings.autoUpdate || manual === 'download') downloadUpdate();
+  } catch (e) {
+    console.log('[update] check failed:', e.message);
+    updateState = { ...updateState, status: 'error', error: e.message || 'Check failed' };
+    sendState();
+  }
+}
+
+async function downloadUpdate() {
+  if (!updateState.assetUrl || updateState.status === 'downloading') return;
+  const safeName = path.basename(updateState.assetName || 'Halo-Setup.exe');
+  const dest = path.join(app.getPath('temp'), safeName);
+  const part = dest + '.part';
+  updateState = { ...updateState, status: 'downloading', progress: 0, error: null };
+  sendState();
+  try {
+    const r = await fetch(updateState.assetUrl, { headers: { 'User-Agent': `Halo/${app.getVersion()}` } });
+    if (!r.ok || !r.body) throw new Error(`Download HTTP ${r.status}`);
+    const total = Number(r.headers.get('content-length')) || 0;
+    let loaded = 0;
+    let lastEmit = 0;
+    const out = fs.createWriteStream(part);
+    let writeErr = null;
+    out.on('error', (err) => { writeErr = err; });
+    const reader = r.body.getReader();
+    while (true) {
+      if (writeErr) throw writeErr;
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!out.write(value)) {
+        await new Promise((resolve, reject) => {
+          if (writeErr) return reject(writeErr);
+          out.once('drain', resolve);
+        });
+      }
+      loaded += value.length;
+      if (total > 0) {
+        const pct = Math.min(99, Math.round((loaded / total) * 100));
+        const now = Date.now();
+        if (pct !== updateState.progress && now - lastEmit > 150) {
+          lastEmit = now;
+          updateState.progress = pct;
+          sendState();
+        }
+      }
+    }
+    if (writeErr) throw writeErr;
+    await new Promise((resolve, reject) => out.end((err) => (err ? reject(err) : resolve())));
+    fs.renameSync(part, dest);
+    updateState = { ...updateState, status: 'ready', progress: 100, installerPath: dest, error: null };
+    console.log('[update] downloaded to', dest);
+    sendState();
+    scheduleTray();
+  } catch (e) {
+    try { if (fs.existsSync(part)) fs.unlinkSync(part); } catch { /* ignore */ }
+    console.log('[update] download failed:', e.message);
+    updateState = { ...updateState, status: 'error', error: e.message || 'Download failed' };
+    sendState();
+  }
+}
+
+function installUpdate() {
+  if (updateState.status !== 'ready' || !updateState.installerPath || !fs.existsSync(updateState.installerPath)) return;
+  settings.installedAssetId = updateState.assetId;
+  try { fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2)); } catch { /* ignore */ }
+  const psCmd = 'Start-Sleep -Seconds 2; Start-Process -FilePath $env:HALO_SETUP -ArgumentList "/S" -Wait; Start-Process -FilePath $env:HALO_EXE';
+  const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psCmd], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    env: { ...process.env, HALO_SETUP: updateState.installerPath, HALO_EXE: process.execPath },
+  });
+  child.unref();
+  app.quit();
+}
 
 // ---------- the settings window ----------
 let settingsWin = null;
@@ -416,9 +799,11 @@ function stateObj() {
   return {
     settings: { ...settings },
     editMode,
+    runtime: runtimeObj(),
     displays: displayList(),
     packaged: app.isPackaged,
     version: app.getVersion(),
+    update: { ...updateState },
   };
 }
 function metaObj() {
@@ -426,6 +811,7 @@ function metaObj() {
     fonts: systemFonts.length ? systemFonts : FONTS_FALLBACK,
     shapes: SHAPES,
     styles: STYLE_DEFS,
+    discStyles: DISC_STYLES,
     palettes: PALETTES,
     lyricColors: LYRIC_COLORS,
   };
@@ -434,36 +820,43 @@ function sendState() {
   if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('state', stateObj());
 }
 function openSettings() {
+  loadSystemFonts();
   if (settingsWin && !settingsWin.isDestroyed()) {
     settingsWin.show();
     settingsWin.focus();
     return;
   }
   settingsWin = new BrowserWindow({
-    width: 1040, height: 740, minWidth: 820, minHeight: 560,
-    backgroundColor: '#0b0b0e', title: 'Halo', icon: path.join(__dirname, 'build', 'icon.png'), autoHideMenuBar: true, show: false,
-    webPreferences: { preload: path.join(__dirname, 'settings-preload.js') },
+    width: 1060, height: 760, minWidth: 820, minHeight: 580,
+    backgroundColor: '#000000', title: 'Halo', icon: path.join(__dirname, 'build', 'icon.png'), autoHideMenuBar: true, show: false,
+    webPreferences: { preload: path.join(__dirname, 'settings-preload.js'), spellcheck: false },
   });
   settingsWin.removeMenu();
   if (editMode) settingsWin.setAlwaysOnTop(true, 'screen-saver');
   settingsWin.loadFile(path.join(__dirname, 'settings.html'));
   settingsWin.once('ready-to-show', () => settingsWin.show());
-  // while the window is open the overlay plays a sample song, so every style can be previewed
-  for (const ev of ['show', 'hide', 'minimize', 'restore']) settingsWin.on(ev, broadcastSettings);
-  settingsWin.on('close', (e) => { if (!quitting) { e.preventDefault(); settingsWin.hide(); } }); // keep it for next time
+  settingsWin.on('closed', () => { settingsWin = null; });
 }
 ipcMain.handle('hs-init', () => ({ meta: metaObj(), state: stateObj() }));
 ipcMain.on('hs-set', (_e, d) => commit(sanitize(d)));
 ipcMain.on('hs-act', (_e, name) => {
   if (name === 'toggle-edit') setEdit(!editMode);
+  else if (name === 'toggle-pause') { manualPaused = !manualPaused; reconcileOverlays(false); }
   else if (name === 'reset-layout') commit({ lyricG: null, discG: null, lyricRot: 0, discRot: 0 });
   else if (name === 'fit-box') { const r = styleDef(settings.lyricStyle).rec; commit({ lyricW: r[0], lyricH: r[1], boxAuto: true }); }
+  else if (name === 'check-update') checkForUpdates(true);
+  else if (name === 'download-update') downloadUpdate();
+  else if (name === 'install-update') installUpdate();
   else if (name === 'quit') app.quit();
 });
 
-// ---------- every font installed on this PC (asked of Windows once at start-up) ----------
+// ---------- every font installed on this PC (loaded lazily when Settings opens) ----------
 let systemFonts = [];
+let fontsLoaded = false;
+let fontsLoading = false;
 function loadSystemFonts() {
+  if (fontsLoaded || fontsLoading) return;
+  fontsLoading = true;
   const cmd = '[Console]::OutputEncoding=[Text.Encoding]::UTF8; Add-Type -AssemblyName System.Drawing; ' +
     '(New-Object System.Drawing.Text.InstalledFontCollection).Families | ForEach-Object { $_.Name } | ConvertTo-Json -Compress';
   const ps = spawn('powershell.exe', ['-NoProfile', '-Command', cmd], { windowsHide: true });
@@ -471,11 +864,13 @@ function loadSystemFonts() {
   ps.stdout.on('data', (c) => { out += c; });
   ps.stderr.on('data', (c) => console.log('[fonts error]', String(c).trim()));
   ps.on('exit', () => {
+    fontsLoading = false;
     try {
       let list = JSON.parse(out);
       if (typeof list === 'string') list = [list];
       systemFonts = [...new Set(list.filter((n) => typeof n === 'string' && n.trim()))]
         .sort((a, b) => a.localeCompare(b));
+      fontsLoaded = true;
       console.log('[fonts]', systemFonts.length, 'installed fonts found');
       if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('meta', metaObj());
     } catch (e) { console.log('[fonts] could not read the font list:', e.message); }
@@ -563,12 +958,22 @@ function trayIcon() {
 function buildTray() {
   if (!tray) {
     tray = new Tray(trayIcon());
-    tray.setToolTip('Halo \u2013 click for settings');
     tray.on('click', openSettings);
   }
+  const rt = runtimeObj();
+  tray.setToolTip(rt.allPaused ? 'Halo (Paused) \u2013 click for settings' : 'Halo \u2013 click for settings');
   const toggle = (label, key) => ({ label, type: 'checkbox', checked: !!settings[key], click: (i) => commit({ [key]: i.checked }) });
-  tray.setContextMenu(Menu.buildFromTemplate([
+  const items = [
     { label: 'Open Halo settings', click: openSettings },
+    {
+      label: manualPaused ? 'Resume desktop overlay' : 'Pause desktop overlay',
+      click: () => { manualPaused = !manualPaused; reconcileOverlays(false); },
+    },
+  ];
+  if (updateState.status === 'ready') {
+    items.push({ label: `Install update (${updateState.releaseName || 'new'}) & restart`, click: installUpdate });
+  }
+  items.push(
     { type: 'separator' },
     toggle('Edge glow', 'glow'),
     toggle('Lyrics', 'lyrics'),
@@ -577,7 +982,8 @@ function buildTray() {
     { label: 'Edit layout on screen  (Ctrl+Alt+L)', type: 'checkbox', checked: editMode, click: () => setEdit(!editMode) },
     { type: 'separator' },
     { label: 'Quit Halo  (Ctrl+Alt+Q)', click: () => app.quit() },
-  ]));
+  );
+  tray.setContextMenu(Menu.buildFromTemplate(items));
 }
 
 // ---------- lyrics (LRCLIB, free, no key) ----------
@@ -636,7 +1042,8 @@ async function fetchArtFallback(m, token) {
     const r = await fetchJson(`https://itunes.apple.com/search?${new URLSearchParams({ term: `${m.artist} ${clean}`, entity: 'song', limit: '5' })}`);
     const url = mediaFilter.pickBestItunesArt(m, r && r.results);
     if (!url) { console.log('[art] fallback found nothing'); return; }
-    const img = await fetch(url.replace('100x100bb', '600x600bb'));
+    const sz = settings.discSize <= 260 ? '300x300bb' : '600x600bb';
+    const img = await fetch(url.replace('100x100bb', sz));
     if (!img.ok) return;
     const b64 = Buffer.from(await img.arrayBuffer()).toString('base64');
     if (token !== artToken || lastArt) return;
@@ -652,6 +1059,8 @@ let lastLogged = '';
 let lastIgnoredSig = '';
 let lastSessions = [];
 let thumbRequestedFor = null;
+let lastSentMedia = null;
+let lastSentAt = 0;
 
 function applySessions(sessions) {
   lastSessions = Array.isArray(sessions) ? sessions : [];
@@ -676,7 +1085,11 @@ function applySessions(sessions) {
       broadcast('art', null);
     }
     lastMedia = noneMsg;
-    broadcast('media', noneMsg);
+    if (lastSentMedia !== 'none') {
+      lastSentMedia = 'none';
+      lastSentAt = Date.now();
+      broadcast('media', noneMsg);
+    }
     return;
   }
 
@@ -691,8 +1104,10 @@ function applySessions(sessions) {
     broadcast('art', null);
     loadLyrics(m);
     // if Windows hands us no cover within a couple of seconds, look one up
-    const token = ++artToken;
-    setTimeout(() => { if (token === artToken && !lastArt) fetchArtFallback(m, token); }, 2500);
+    if (needsArt()) {
+      const token = ++artToken;
+      setTimeout(() => { if (token === artToken && !lastArt) fetchArtFallback(m, token); }, 2500);
+    }
   }
 
   const art = m.art;
@@ -701,15 +1116,35 @@ function applySessions(sessions) {
     lastArt = art;
     console.log('[art] cover from Windows,', Math.round(art.length / 1024), 'KB');
     broadcast('art', art);
-  } else if (!lastArt && m.hasThumb && thumbRequestedFor !== m.key && mediaProc && mediaProc.stdin.writable) {
+  } else if (needsArt() && !lastArt && m.hasThumb && thumbRequestedFor !== m.key && mediaProc && mediaProc.stdin.writable) {
     thumbRequestedFor = m.key;
     try { mediaProc.stdin.write(`thumb:${m.key}\n`); } catch { /* ignore */ }
   }
 
   const out = { ...m };
   delete out.art;
+  const now = Date.now();
+  const prev = lastSentMedia && typeof lastSentMedia === 'object' ? lastSentMedia : null;
+  const wasPlaying = !!(prev && prev.playing);
+  let shouldSend = !prev || prev.key !== out.key || prev.playing !== out.playing || prev.durMs !== out.durMs;
+  if (!shouldSend && out.playing) {
+    const predictedPos = (prev.posMs || 0) + (now - lastSentAt);
+    if (Math.abs((out.posMs || 0) - predictedPos) > 350 || now - lastSentAt >= 2000) {
+      shouldSend = true;
+    }
+  } else if (!shouldSend && !out.playing && prev.posMs !== out.posMs) {
+    shouldSend = true;
+  }
   lastMedia = out;
-  broadcast('media', out);
+  if (shouldSend) {
+    lastSentMedia = { ...out };
+    lastSentAt = now;
+    broadcast('media', out);
+  }
+  if (!wasPlaying && out.playing) {
+    const owner = audioOwnerWin();
+    if (owner) triggerAudio(owner, false);
+  }
 }
 
 function onMediaLine(line) {
@@ -730,20 +1165,28 @@ function startMedia() {
   ps.stdin.on('error', () => {});
   readline.createInterface({ input: ps.stdout }).on('line', onMediaLine);
   readline.createInterface({ input: ps.stderr }).on('line', (l) => console.log('[media.ps1 error]', l));
-  ps.on('exit', () => { if (!quitting) setTimeout(startMedia, 3000); });
+  ps.on('exit', () => {
+    mediaProc = null;
+    mediaIdleSent = null;
+    if (!quitting) setTimeout(startMedia, 3000);
+  });
   mediaProc = ps;
+  const allPaused = runtimeObj().allPaused;
+  if (allPaused && ps.stdin.writable) {
+    mediaIdleSent = true;
+    try { ps.stdin.write('idle:1\n'); } catch { /* ignore */ }
+  }
 }
 
 // ---------- boot ----------
 app.whenReady().then(() => {
   loadSettings();
-  loadSystemFonts();
+  onBattery = powerMonitor.isOnBatteryPower();
   setupLoopback();
   buildTray();
   createOverlays();
   startMedia();
   startZorder();
-  setInterval(applyZ, 1500);
   const refresh = () => { editMode = false; createOverlays(); buildTray(); sendState(); };
   const recoverAudio = () => {
     setTimeout(() => {
@@ -751,16 +1194,33 @@ app.whenReady().then(() => {
       if (owner) triggerAudio(owner, true);
     }, 1500);
   };
+  const updateBattery = () => {
+    const next = powerMonitor.isOnBatteryPower();
+    if (next !== onBattery) {
+      onBattery = next;
+      reconcileOverlays(true);
+    }
+  };
   // emergency exits that work even if the overlay or tray is hard to reach
   globalShortcut.register('CommandOrControl+Alt+L', () => setEdit(!editMode));
   globalShortcut.register('CommandOrControl+Alt+Q', () => app.quit());
   screen.on('display-added', refresh);
   screen.on('display-removed', refresh);
   screen.on('display-metrics-changed', refresh);
-  powerMonitor.on('resume', recoverAudio);
-  powerMonitor.on('unlock-screen', recoverAudio);
-  // the settings window opens by itself the first time, and any time from the tray icon
-  if (firstRun || !settings.settingsShown) { settings.settingsShown = true; scheduleSave(); openSettings(); }
+  powerMonitor.on('on-battery', updateBattery);
+  powerMonitor.on('on-ac', updateBattery);
+  powerMonitor.on('lock-screen', () => { systemLocked = true; reconcileOverlays(false); });
+  powerMonitor.on('suspend', () => { systemLocked = true; reconcileOverlays(false); });
+  powerMonitor.on('unlock-screen', () => { systemLocked = false; reconcileOverlays(false); recoverAudio(); });
+  powerMonitor.on('resume', () => { systemLocked = false; reconcileOverlays(false); recoverAudio(); });
+  // Open the desktop window alongside the background desktop overlays on startup unless minimized
+  if (!settings.startMinimized || !settings.settingsShown) {
+    settings.settingsShown = true;
+    scheduleSave();
+    openSettings();
+  }
+  setTimeout(() => { if (settings.autoUpdate) checkForUpdates(false); }, 6000);
+  setInterval(() => { if (settings.autoUpdate) checkForUpdates(false); }, 2 * 60 * 60 * 1000);
 });
 
 app.on('second-instance', openSettings);

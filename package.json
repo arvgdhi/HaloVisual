@@ -8,7 +8,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis --x64",
+    "dist": "electron-builder --win nsis --x64 --publish never",
     "fix-electron": "powershell -NoProfile -ExecutionPolicy Bypass -File fix-electron.ps1"
   },
   "devDependencies": {
@@ -20,6 +20,7 @@
     "productName": "Halo",
     "copyright": "Halo",
     "artifactName": "Halo-Setup-${version}.exe",
+    "publish": null,
     "directories": {
       "output": "dist",
       "buildResources": "build"

@@ -118,13 +118,17 @@
     root.classList.add('sc-ship');
     const wall = mk('div', 'wall', root);
     const rows = new Map();
+    let lastFs = '', lastWallTf = '';
     function ensure(i) {
       if (rows.has(i)) return rows.get(i);
       const ws = lineWords(env.L, i);
       let r = null;
       if (ws.length) {
         const el = mk('div', 'row', wall);
-        r = { el, settled: false, words: ws.map((w) => ({ el: mk('span', 'w', el, w.text), start: w.start })) };
+        r = {
+          el, settled: false, lastTf: '', lastOpa: '',
+          words: ws.map((w) => ({ el: mk('span', 'w', el, w.text), start: w.start, lastTf: '', lastOpa: '' })),
+        };
       }
       rows.set(i, r);
       return r;
@@ -132,15 +136,19 @@
     return {
       update(pos, now, idx) {
         const S = env.S(), H = env.H();
-        root.style.fontSize = Math.min(S.fontSize * 1.15, H * 0.2).toFixed(1) + 'px';
-        wall.style.transform = `rotateY(${(Math.sin(now / 2600) * 8).toFixed(2)}deg) rotateX(${(2 + Math.cos(now / 3300) * 4).toFixed(2)}deg)`;
+        const fs = Math.min(S.fontSize * 1.15, H * 0.2).toFixed(1) + 'px';
+        if (fs !== lastFs) { lastFs = fs; root.style.fontSize = fs; }
+        const wtf = `rotateY(${(Math.sin(now / 2600) * 8).toFixed(2)}deg) rotateX(${(2 + Math.cos(now / 3300) * 4).toFixed(2)}deg)`;
+        if (wtf !== lastWallTf) { lastWallTf = wtf; wall.style.transform = wtf; }
         for (const [i, r] of rows) if (i > idx || i < idx - 3) { if (r) r.el.remove(); rows.delete(i); }
         for (let i = Math.max(0, idx - 3); i <= idx; i++) {
           const r = ensure(i);
           if (!r) continue;
           const d = idx - i;
-          r.el.style.transform = `translate3d(0, ${(-d * 1.75).toFixed(2)}em, ${-d * 140}px) translateY(-50%)`;
-          r.el.style.opacity = d === 0 ? 1 : Math.max(0, 0.55 - 0.18 * (d - 1)).toFixed(2);
+          const rtf = `translate3d(0, ${(-d * 1.75).toFixed(2)}em, ${-d * 140}px) translateY(-50%)`;
+          const ropa = d === 0 ? '1' : Math.max(0, 0.55 - 0.18 * (d - 1)).toFixed(2);
+          if (rtf !== r.lastTf) { r.lastTf = rtf; r.el.style.transform = rtf; }
+          if (ropa !== r.lastOpa) { r.lastOpa = ropa; r.el.style.opacity = ropa; }
           if (d > 0 && r.settled) continue;
           let all = true;
           for (const w of r.words) {
@@ -148,8 +156,10 @@
             if (t < 700) all = false;
             const e = t < 0 ? 0 : easeOutCubic(clamp01(t / 380));
             const pop = t < 0 ? 0 : Math.exp(-t / 150) * 0.18;
-            w.el.style.transform = `translate3d(0, ${((e - 1) * 0.6).toFixed(3)}em, ${((1 - e) * 650).toFixed(0)}px) scale(${(1 + pop).toFixed(3)})`;
-            w.el.style.opacity = t < 0 ? 0 : clamp01(t / 110).toFixed(2);
+            const tf = `translate3d(0, ${((e - 1) * 0.6).toFixed(3)}em, ${((1 - e) * 650).toFixed(0)}px) scale(${(1 + pop).toFixed(3)})`;
+            const opa = t < 0 ? '0' : clamp01(t / 110).toFixed(2);
+            if (tf !== w.lastTf) { w.lastTf = tf; w.el.style.transform = tf; }
+            if (opa !== w.lastOpa) { w.lastOpa = opa; w.el.style.opacity = opa; }
           }
           r.settled = all;
         }
@@ -158,7 +168,7 @@
   };
 
   // Fisheye: true spherical barrel-distortion lens via offscreen 2D text + WebGL fragment shader
-  const FISH_VS = 'attribute vec2 aPos;varying vec2 vUv;void main(){vUv=aPos*0.5+0.5;gl_Position=vec4(aPos,0.0,1.0);}';
+  const FISH_VS = 'attribute vec2 aPos;varying vec2 vUv;void main(){vUv=vec2(aPos.x*0.5+0.5,0.5-aPos.y*0.5);gl_Position=vec4(aPos,0.0,1.0);}';
   const FISH_FS = `
     precision mediump float;
     varying vec2 vUv;
@@ -176,16 +186,20 @@
       float r2 = dot(p, p);
       float r = sqrt(r2);
       float warp = uZoom * (1.0 + uK1 * r2 + uK2 * r2 * r2);
-      float ca = uChroma * r2;
-      vec2 uvR = 0.5 + 0.5 * p * warp * (1.0 + ca);
-      vec2 uvG = 0.5 + 0.5 * p * warp;
-      vec2 uvB = 0.5 + 0.5 * p * warp * (1.0 - ca);
-      vec4 tR = sampleSafe(uvR);
-      vec4 tG = sampleSafe(uvG);
-      vec4 tB = sampleSafe(uvB);
-      float a = max(tR.a, max(tG.a, tB.a));
       float shade = 1.0 - 0.22 * min(r2, 1.0);
       float edge = 1.0 - smoothstep(0.76, 1.0, r);
+      vec2 uvG = 0.5 + 0.5 * p * warp;
+      vec4 tG = sampleSafe(uvG);
+      if (uChroma <= 0.0001) {
+        gl_FragColor = vec4(tG.rgb * shade * edge, tG.a * edge);
+        return;
+      }
+      float ca = uChroma * r2;
+      vec2 uvR = 0.5 + 0.5 * p * warp * (1.0 + ca);
+      vec2 uvB = 0.5 + 0.5 * p * warp * (1.0 - ca);
+      vec4 tR = sampleSafe(uvR);
+      vec4 tB = sampleSafe(uvB);
+      float a = max(tR.a, max(tG.a, tB.a));
       vec3 rgb = vec3(tR.r, tG.g, tB.b) * shade * edge;
       gl_FragColor = vec4(rgb, a * edge);
     }
@@ -261,9 +275,14 @@
       let scrollX = 0, scrollY = 0, placedX = false, placedY = false, lastSlot = -1;
       let colTick = -999, cols = { c1: '#7c5cff', c2: '#ff4fa3', on: '#ffffff', off: 'rgba(255,255,255,0.42)', glow: 'rgba(124,92,255,0.55)' };
       const layoutCache = new Map();
-      let cacheSig = '';
+      let cacheSig = '', lastFrameSig = '';
 
       function refreshColors(now) {
+        if (env.colors) {
+          const c = env.colors();
+          cols.c1 = c.c1; cols.c2 = c.c2; cols.on = c.on; cols.off = c.off; cols.glow = c.glow;
+          return;
+        }
         if (now - colTick < 250) return;
         colTick = now;
         const st = getComputedStyle(document.documentElement);
@@ -323,8 +342,13 @@
       return {
         update(pos, now, idx) {
           const W = env.W(), H = env.H(), S = env.S();
-          const dpr = Math.min(window.devicePixelRatio || 1, 2);
-          scale = Math.min(dpr, 1280 / Math.max(W, H, 1));
+          const perf = env.perf ? env.perf() : { glowQuality: 'medium', reducedEffects: false };
+          const lowFx = !!perf.reducedEffects;
+          const q = perf.glowQuality || 'medium';
+          const maxDpr = lowFx ? 1 : (q === 'high' ? 2 : 1.25);
+          const maxDim = lowFx ? 640 : (q === 'high' ? 1280 : 960);
+          const dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
+          scale = Math.min(dpr, maxDim / Math.max(W, H, 1));
           const nw = Math.max(64, Math.round(W * scale));
           const nh = Math.max(64, Math.round(H * scale));
           if (nw !== cw || nh !== ch) {
@@ -332,13 +356,17 @@
             glCanvas.width = srcCanvas.width = cw;
             glCanvas.height = srcCanvas.height = ch;
             if (gl) gl.viewport(0, 0, cw, ch);
+            lastFrameSig = '';
           }
 
           refreshColors(now);
-          sctx.clearRect(0, 0, cw, ch);
           if (!nonEmpty.length) {
-            if (gl) { gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
-            else if (fbCtx) fbCtx.clearRect(0, 0, cw, ch);
+            if (lastFrameSig !== 'empty') {
+              lastFrameSig = 'empty';
+              sctx.clearRect(0, 0, cw, ch);
+              if (gl) { gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
+              else if (fbCtx) fbCtx.clearRect(0, 0, cw, ch);
+            }
             return;
           }
 
@@ -377,12 +405,19 @@
           const wordHit = Math.exp(-hitAge / 150);
           const beat = env.level();
 
+          const frameSig = `${cw}x${ch}|${curSlot}|${activeWi}|${Math.round(scrollX * 4)}|${Math.round(scrollY * 4)}|${Math.round(wordHit * 50)}|${Math.round(beat * 40)}|${cols.c1}|${cols.c2}|${cols.on}|${cols.off}|${cacheSig}|${lowFx ? 1 : 0}`;
+          if (frameSig === lastFrameSig) return;
+          lastFrameSig = frameSig;
+
+          sctx.clearRect(0, 0, cw, ch);
           sctx.save();
           sctx.textBaseline = 'middle';
           sctx.textAlign = 'left';
-          sctx.shadowColor = 'rgba(0,0,0,0.7)';
-          sctx.shadowBlur = 8 * scale;
-          sctx.shadowOffsetY = 2 * scale;
+          if (!lowFx) {
+            sctx.shadowColor = 'rgba(0,0,0,0.7)';
+            sctx.shadowBlur = 8 * scale;
+            sctx.shadowOffsetY = 2 * scale;
+          }
 
           const nSlots = nonEmpty.length;
           const wrapDemo = !!env.demo && nSlots > 1;
@@ -415,9 +450,11 @@
                 g.addColorStop(0, cols.c1);
                 g.addColorStop(1, cols.c2);
                 sctx.fillStyle = g;
-                sctx.shadowColor = cols.glow;
-                sctx.shadowBlur = (16 + 10 * beat) * scale;
-                sctx.shadowOffsetY = 0;
+                if (!lowFx) {
+                  sctx.shadowColor = cols.glow;
+                  sctx.shadowBlur = (16 + 10 * beat) * scale;
+                  sctx.shadowOffsetY = 0;
+                }
               } else {
                 sctx.fillStyle = isSung ? cols.on : cols.off;
               }
@@ -437,7 +474,7 @@
           const zoom = Math.max(0.42, 0.48 - 0.03 * wordHit - 0.02 * beat);
           const k1 = 0.92 + 0.12 * beat;
           const k2 = 0.32;
-          const chroma = 0.03 + 0.015 * beat;
+          const chroma = lowFx ? 0 : (0.03 + 0.015 * beat);
 
           if (gl && prog) {
             gl.clearColor(0, 0, 0, 0);
@@ -492,13 +529,13 @@
       groups.forEach((g, gi) => {
         const row = mk('div', 'vrow ' + roles[gi], box);
         const inner = roles[gi] === 'box' ? mk('span', 'vpill', row) : row;
-        if (roles[gi] === 'box') pill = { el: inner, start: g[0].start };
+        if (roles[gi] === 'box') pill = { el: inner, start: g[0].start, lastTf: '', lastOpa: '' };
         for (const w of g) {
           const sp = mk('span', 'vw', inner);
           mk('span', 'vt', sp, w.text);
           const ic = iconFor(w.text);
           if (ic) mk('span', 'vi', sp, ic);
-          words.push({ el: sp, start: w.start });
+          words.push({ el: sp, start: w.start, lastTf: '', lastOpa: '' });
         }
       });
     }
@@ -518,12 +555,20 @@
       update(pos, now, idx) {
         if (idx !== built) { built = idx; build(idx); }
         fit();
-        if (pill) { const t = pos - pill.start; pill.el.style.opacity = t < 0 ? 0 : clamp01(t / 140).toFixed(2); pill.el.style.transform = `scale(${(0.6 + 0.4 * easeOutBack(clamp01(t / 380))).toFixed(3)})`; }
+        if (pill) {
+          const t = pos - pill.start;
+          const opa = t < 0 ? '0' : clamp01(t / 140).toFixed(2);
+          const tf = `scale(${(0.6 + 0.4 * easeOutBack(clamp01(t / 380))).toFixed(3)})`;
+          if (opa !== pill.lastOpa) { pill.lastOpa = opa; pill.el.style.opacity = opa; }
+          if (tf !== pill.lastTf) { pill.lastTf = tf; pill.el.style.transform = tf; }
+        }
         for (const w of words) {
           const t = pos - w.start;
           const e = t < 0 ? 0 : easeOutBack(clamp01(t / 380));
-          w.el.style.transform = `scale(${(0.5 + 0.5 * e).toFixed(3)}) translateY(${((1 - e) * 0.25).toFixed(3)}em)`;
-          w.el.style.opacity = t < 0 ? 0 : clamp01(t / 140).toFixed(2);
+          const tf = `scale(${(0.5 + 0.5 * e).toFixed(3)}) translateY(${((1 - e) * 0.25).toFixed(3)}em)`;
+          const opa = t < 0 ? '0' : clamp01(t / 140).toFixed(2);
+          if (tf !== w.lastTf) { w.lastTf = tf; w.el.style.transform = tf; }
+          if (opa !== w.lastOpa) { w.lastOpa = opa; w.el.style.opacity = opa; }
         }
       },
     };
@@ -701,9 +746,10 @@
       const label = sv('text', { x: clampX(nd.x, w.text, f, W), y: up ? nd.y - 18 : nd.y + 18 + f * 0.72, 'text-anchor': 'middle', class: 'br-lab' }, g);
       label.textContent = w.text;
       label.style.fontSize = f.toFixed(1) + 'px';
-      return { w, node, label, branch, bl, leaf, up };
+      return { w, node, label, branch, bl, leaf, up, lastR: '', lastOn: null, lastLOpa: '', lastLTf: '', lastBDash: '', lastLeafOpa: '' };
     });
     const keys = [{ t: ws[0].start - 450, l: 0 }, ...ws.map((w, i) => ({ t: w.start, l: lens[i] })), { t: ws[n - 1].end + 300, l: total }];
+    let lastDash = '';
     return {
       frame(pos) {
         let l = 0;
@@ -711,17 +757,24 @@
         else if (pos > keys[0].t) {
           for (let k = 1; k < keys.length; k++) if (pos <= keys[k].t) { const a = keys[k - 1], b = keys[k]; l = lerp(a.l, b.l, clamp01((pos - a.t) / Math.max(1, b.t - a.t))); break; }
         }
-        prog.style.strokeDashoffset = (total - l).toFixed(1);
+        const dash = (total - l).toFixed(1);
+        if (dash !== lastDash) { lastDash = dash; prog.style.strokeDashoffset = dash; }
         for (const it of items) {
           const t = pos - it.w.start;
           const e = t < 0 ? 0 : easeOutBack(clamp01(t / 350));
-          it.node.setAttribute('r', (4 + 4 * e).toFixed(2));
-          it.node.classList.toggle('on', t >= 0);
-          it.label.style.opacity = t < 0 ? 0 : clamp01(t / 160).toFixed(2);
-          it.label.style.transform = `translateY(${((1 - easeOutCubic(clamp01(t / 300))) * (it.up ? 6 : -6)).toFixed(2)}px)`;
+          const r = (4 + 4 * e).toFixed(2);
+          if (r !== it.lastR) { it.lastR = r; it.node.setAttribute('r', r); }
+          const on = t >= 0;
+          if (on !== it.lastOn) { it.lastOn = on; it.node.classList.toggle('on', on); }
+          const lopa = t < 0 ? '0' : clamp01(t / 160).toFixed(2);
+          if (lopa !== it.lastLOpa) { it.lastLOpa = lopa; it.label.style.opacity = lopa; }
+          const ltf = `translateY(${((1 - easeOutCubic(clamp01(t / 300))) * (it.up ? 6 : -6)).toFixed(2)}px)`;
+          if (ltf !== it.lastLTf) { it.lastLTf = ltf; it.label.style.transform = ltf; }
           const bp = clamp01((t - 80) / 420);
-          it.branch.style.strokeDashoffset = (it.bl * (1 - bp)).toFixed(1);
-          it.leaf.style.opacity = bp >= 1 ? 1 : 0;
+          const bdash = (it.bl * (1 - bp)).toFixed(1);
+          if (bdash !== it.lastBDash) { it.lastBDash = bdash; it.branch.style.strokeDashoffset = bdash; }
+          const leafOpa = bp >= 1 ? '1' : '0';
+          if (leafOpa !== it.lastLeafOpa) { it.lastLeafOpa = leafOpa; it.leaf.style.opacity = leafOpa; }
         }
       },
     };
@@ -751,7 +804,7 @@
       const a = nodes[i - 1], b = nodes[i], len = Math.hypot(b.x - a.x, b.y - a.y);
       const ln = sv('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'co-seg' }, g);
       ln.style.strokeDasharray = `${len} ${len + 2}`;
-      segs.push({ ln, len });
+      segs.push({ ln, len, lastDash: '' });
     }
     const items = ws.map((w, i) => {
       const nd = nodes[i], above = nd.y > H / 2;
@@ -759,21 +812,25 @@
       const label = sv('text', { x: clampX(nd.x, w.text, f, W), y: above ? nd.y - 22 : nd.y + 22 + f * 0.7, 'text-anchor': 'middle', class: 'co-lab' }, g);
       label.textContent = w.text;
       label.style.fontSize = f.toFixed(1) + 'px';
-      return { w, star, label, nd };
+      return { w, star, label, nd, lastTf: '', lastOn: null, lastOpa: '' };
     });
     return {
       frame(pos, now) {
         segs.forEach((s, i) => {
           const t0 = ws[i + 1].start - 280;
-          s.ln.style.strokeDashoffset = (s.len * (1 - smooth(clamp01((pos - t0) / 280)))).toFixed(1);
+          const dash = (s.len * (1 - smooth(clamp01((pos - t0) / 280)))).toFixed(1);
+          if (dash !== s.lastDash) { s.lastDash = dash; s.ln.style.strokeDashoffset = dash; }
         });
         items.forEach((it, i) => {
           const t = pos - it.w.start;
           const e = t < 0 ? 0 : easeOutBack(clamp01(t / 420));
           const size = t < 0 ? 2.6 : (6 + 9 * e) * (1 + 0.1 * Math.sin(now / 240 + i * 1.7));
-          it.star.setAttribute('transform', `translate(${it.nd.x.toFixed(1)} ${it.nd.y.toFixed(1)}) scale(${size.toFixed(2)})`);
-          it.star.classList.toggle('on', t >= 0);
-          it.label.style.opacity = t < 0 ? 0 : clamp01(t / 200).toFixed(2);
+          const tf = `translate(${it.nd.x.toFixed(1)} ${it.nd.y.toFixed(1)}) scale(${size.toFixed(2)})`;
+          if (tf !== it.lastTf) { it.lastTf = tf; it.star.setAttribute('transform', tf); }
+          const on = t >= 0;
+          if (on !== it.lastOn) { it.lastOn = on; it.star.classList.toggle('on', on); }
+          const opa = t < 0 ? '0' : clamp01(t / 200).toFixed(2);
+          if (opa !== it.lastOpa) { it.lastOpa = opa; it.label.style.opacity = opa; }
         });
       },
     };
@@ -798,7 +855,7 @@
         const p = sv('path', { d: `M${x1.toFixed(1)} ${y1.toFixed(1)} Q${(cx + Math.cos(am) * cr).toFixed(1)} ${(cy + Math.sin(am) * cr).toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`, class: 'wb-ring', fill: 'none' }, g);
         const len = p.getTotalLength();
         p.style.strokeDasharray = `${len} ${len + 2}`;
-        segs.push({ p, len, t: (j + 1 < spokes ? tOf(j + 1) : tOf(spokes - 1) + 260) + ri * 50 });
+        segs.push({ p, len, t: (j + 1 < spokes ? tOf(j + 1) : tOf(spokes - 1) + 260) + ri * 50, lastDash: '' });
       }
     });
     const sp = [];
@@ -815,17 +872,25 @@
         label.style.fontSize = f.toFixed(1) + 'px';
       }
       const dew = sv('circle', { cx: x, cy: y, r: 3, class: 'wb-dew' }, g);
-      sp.push({ ln, label, dew, t: tOf(j) });
+      sp.push({ ln, label, dew, t: tOf(j), lastDash: '', lastDew: '', lastLab: '' });
     }
     return {
       frame(pos) {
         for (const s of sp) {
           const p = easeOutCubic(clamp01((pos - s.t) / 380));
-          s.ln.style.strokeDashoffset = (R * (1 - p)).toFixed(1);
-          s.dew.style.opacity = p >= 1 ? 1 : 0;
-          if (s.label) s.label.style.opacity = clamp01((pos - s.t) / 200).toFixed(2);
+          const dash = (R * (1 - p)).toFixed(1);
+          if (dash !== s.lastDash) { s.lastDash = dash; s.ln.style.strokeDashoffset = dash; }
+          const dewOpa = p >= 1 ? '1' : '0';
+          if (dewOpa !== s.lastDew) { s.lastDew = dewOpa; s.dew.style.opacity = dewOpa; }
+          if (s.label) {
+            const lopa = clamp01((pos - s.t) / 200).toFixed(2);
+            if (lopa !== s.lastLab) { s.lastLab = lopa; s.label.style.opacity = lopa; }
+          }
         }
-        for (const s of segs) s.p.style.strokeDashoffset = (s.len * (1 - smooth(clamp01((pos - s.t) / 320)))).toFixed(1);
+        for (const s of segs) {
+          const dash = (s.len * (1 - smooth(clamp01((pos - s.t) / 320)))).toFixed(1);
+          if (dash !== s.lastDash) { s.lastDash = dash; s.p.style.strokeDashoffset = dash; }
+        }
       },
     };
   });
@@ -994,7 +1059,7 @@
     let run = 1000;
     for (let i = 0; i < env.L.length; i++) { if (env.L[i].text) run += amt(i); cumAt[i] = run; }
     const els = new Map();
-    let curIdx = -9, shown = 1000;
+    let curIdx = -9, shown = 1000, lastNow = 0, lastFs = '', lastBal = '';
     const fmt = (v) => '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     function row(i, animate) {
       const h = hash(i * 17 + 3);
@@ -1016,8 +1081,11 @@
       update(pos, now, idx) {
         const S = env.S();
         theme(root, S);
-        root.style.fontSize = nativeSize(S, 13, 26, 0.5).toFixed(1) + 'px';
+        const fs = nativeSize(S, 13, 26, 0.5).toFixed(1) + 'px';
+        if (fs !== lastFs) { lastFs = fs; root.style.fontSize = fs; }
         if (idx !== curIdx) {
+          lastDash = '';
+          lastMeTf = '';
           const inc = idx === curIdx + 1;
           if (!inc) { for (const r of els.values()) r.remove(); els.clear(); }
           const keep = [];
@@ -1027,10 +1095,13 @@
           curIdx = idx;
           keep.forEach((i, d) => { els.get(i).style.setProperty('--d', d); els.get(i).classList.toggle('now', d === 0); });
         }
+        const dt = lastNow ? Math.min(0.1, Math.max(0, (now - lastNow) / 1000)) : 0.016;
+        lastNow = now;
         const target = idx >= 0 ? cumAt[idx] : 1000;
-        shown += (target - shown) * 0.12;
+        shown += (target - shown) * (1 - Math.exp(-dt * 7.5));
         if (Math.abs(target - shown) < 0.01) shown = target;
-        bal.textContent = fmt(shown);
+        const balTxt = fmt(shown);
+        if (balTxt !== lastBal) { lastBal = balTxt; bal.textContent = balTxt; }
       },
     };
   };
@@ -1080,6 +1151,7 @@
 
     const pins = new Map(), decor = [];
     let curIdx = -9, cam = null, lastNow = 0, lenBefore = 0, lenTotal = 0;
+    let lastFs = '', lastDash = '', lastMeTf = '', lastChip = '', lastLayerTf = '', lastBgPos = '';
     function addDecor(kind, x, y, r) {
       const el = mk('div', kind, under);
       if (kind === 'park') {
@@ -1104,9 +1176,12 @@
       update(pos, now, idx) {
         const S = env.S(), W = env.W(), H = env.H();
         theme(root, S);
-        root.style.fontSize = nativeSize(S, 13, 24, 0.5).toFixed(1) + 'px';
+        const fs = nativeSize(S, 13, 24, 0.5).toFixed(1) + 'px';
+        if (fs !== lastFs) { lastFs = fs; root.style.fontSize = fs; }
         const ci = Math.max(0, idx);
         if (idx !== curIdx) {
+          lastDash = '';
+          lastMeTf = '';
           const inc = idx === curIdx + 1;
           curIdx = idx;
           if (!inc) { for (const e of pins.values()) e.remove(); pins.clear(); for (const e of decor) e.remove(); decor.length = 0; cam = null; }
@@ -1136,17 +1211,26 @@
         const nextT = env.L[ci + 1] ? env.L[ci + 1].t : (line ? line.t + 4000 : 0);
         const frac = idx < 0 || !line ? 1 : smooth(clamp01((pos - line.t) / Math.min(1500, Math.max(600, (nextT - line.t) * 0.7))));
         const drawn = ci === 0 ? 0 : lenBefore + frac * (lenTotal - lenBefore);
-        casing.style.strokeDashoffset = route.style.strokeDashoffset = (lenTotal - drawn + 0.5).toFixed(1);
-        const wp = lenTotal > 0 ? route.getPointAtLength(Math.min(lenTotal, drawn)) : pt(ci);
-        me.style.left = wp.x + 'px'; me.style.top = wp.y + 'px';
-        chipBot.textContent = '🚶 ' + Math.max(1, Math.round(drawn / 90)) + ' min · ' + (drawn / 900).toFixed(1) + ' mi';
+        const dash = (lenTotal - drawn + 0.5).toFixed(1);
+        if (dash !== lastDash) {
+          lastDash = dash;
+          casing.style.strokeDashoffset = route.style.strokeDashoffset = dash;
+          const wp = lenTotal > 0 ? route.getPointAtLength(Math.min(lenTotal, drawn)) : pt(ci);
+          const meTf = `translate3d(${wp.x.toFixed(1)}px,${wp.y.toFixed(1)}px,0)`;
+          if (meTf !== lastMeTf) { lastMeTf = meTf; me.style.transform = meTf; }
+          const chipTxt = '🚶 ' + Math.max(1, Math.round(drawn / 90)) + ' min · ' + (drawn / 900).toFixed(1) + ' mi';
+          if (chipTxt !== lastChip) { lastChip = chipTxt; chipBot.textContent = chipTxt; }
+        }
         // camera follows
         const b = pt(ci);
         const tx = b.x - W * 0.5, ty = b.y - H * 0.66;
         const dt = Math.min(0.1, Math.max(0, (now - lastNow) / 1000)); lastNow = now;
         if (!cam) cam = { x: tx, y: ty }; else { const k = 1 - Math.exp(-dt * 3.2); cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; }
-        layer.style.transform = `translate(${(-cam.x).toFixed(1)}px,${(-cam.y).toFixed(1)}px)`;
-        bg.style.backgroundPosition = `${(-cam.x).toFixed(1)}px ${(-cam.y).toFixed(1)}px`;
+        const cx = (-cam.x).toFixed(1), cy = (-cam.y).toFixed(1);
+        const ltf = `translate3d(${cx}px,${cy}px,0)`;
+        if (ltf !== lastLayerTf) { lastLayerTf = ltf; layer.style.transform = ltf; }
+        const bpos = `${cx}px ${cy}px`;
+        if (bpos !== lastBgPos) { lastBgPos = bpos; bg.style.backgroundPosition = bpos; }
       },
     };
   };
@@ -1179,7 +1263,8 @@
       ['Photos', '🌸', 'linear-gradient(#ff9ecd,#9b7bff)', false],
     ];
     const cards = new Map();
-    let curIdx = -9, lastMin = '';
+    let curIdx = -9, lastMin = '', lastClockAt = -10000;
+    let lastFs = '', lastTitle = '', lastArtist = '', lastFillW = '', lastHeightSig = '';
     function card(i, animate) {
       const h = hash(i * 23 + 5), app = APPS[h % APPS.length];
       const c = mk('div', 'ncard', stack);
@@ -1195,20 +1280,28 @@
     return {
       update(pos, now, idx) {
         const S = env.S(), m = env.media();
-        root.style.fontSize = nativeSize(S, 13, 24, 0.5).toFixed(1) + 'px';
-        const d = new Date();
-        const tm = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s?[AP]M/i, '');
-        if (tm !== lastMin) {
-          lastMin = tm; ntime.textContent = tm;
-          ndate.textContent = d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
-          wdDay.textContent = d.toLocaleDateString([], { weekday: 'short' });
-          wdNum.textContent = String(d.getDate());
+        const fs = nativeSize(S, 13, 24, 0.5).toFixed(1) + 'px';
+        if (fs !== lastFs) { lastFs = fs; root.style.fontSize = fs; }
+        if (!lastMin || now - lastClockAt >= 1000) {
+          lastClockAt = now;
+          const d = new Date();
+          const tm = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s?[AP]M/i, '');
+          if (tm !== lastMin) {
+            lastMin = tm; ntime.textContent = tm;
+            ndate.textContent = d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+            wdDay.textContent = d.toLocaleDateString([], { weekday: 'short' });
+            wdNum.textContent = String(d.getDate());
+          }
         }
-        wTitle.textContent = (m && m.title) || 'Nothing playing';
-        wArtist.textContent = (m && m.artist) || '';
+        const titleTxt = (m && m.title) || 'Nothing playing';
+        const artistTxt = (m && m.artist) || '';
+        if (titleTxt !== lastTitle) { lastTitle = titleTxt; wTitle.textContent = titleTxt; }
+        if (artistTxt !== lastArtist) { lastArtist = artistTxt; wArtist.textContent = artistTxt; }
         const pr = m && m.durMs ? clamp01(pos / m.durMs) : clamp01((pos % 9000) / 9000);
-        wFill.style.width = (pr * 100).toFixed(1) + '%';
-        if (idx !== curIdx) {
+        const fillW = (pr * 100).toFixed(1) + '%';
+        if (fillW !== lastFillW) { lastFillW = fillW; wFill.style.width = fillW; }
+        const idxChanged = idx !== curIdx;
+        if (idxChanged) {
           const inc = idx === curIdx + 1;
           if (!inc) { for (const c of cards.values()) c.remove(); cards.clear(); }
           const keep = [];
@@ -1223,9 +1316,13 @@
             c.classList.toggle('back', k > 0);
           });
         }
-        const top = [...cards.entries()].sort((a, b) => b[0] - a[0])[0];
-        const hh = top ? top[1].offsetHeight : 0;
-        for (const c of cards.values()) c.style.setProperty('--h', hh + 'px');
+        const heightSig = `${curIdx}|${env.W()}|${fs}`;
+        if (idxChanged || heightSig !== lastHeightSig) {
+          lastHeightSig = heightSig;
+          const top = [...cards.entries()].sort((a, b) => b[0] - a[0])[0];
+          const hh = top ? top[1].offsetHeight : 0;
+          for (const c of cards.values()) c.style.setProperty('--h', hh + 'px');
+        }
       },
     };
   };

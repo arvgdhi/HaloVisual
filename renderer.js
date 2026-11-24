@@ -3,7 +3,7 @@ const ctx = canvas.getContext('2d');
 const $ = (id) => document.getElementById(id);
 const lyricsEl = $('lyrics'), stageEl = $('stage'), trackEl = $('track'), sceneEl = $('scene');
 const handlesEl = $('handles'), tagEl = $('tag');
-const playerEl = $('player'), recordEl = $('record'), labelEl = $('label'), armEl = $('armg');
+const playerEl = $('player'), recordEl = $('record'), labelEl = $('label'), artfullEl = $('artfull'), sleeveArtEl = $('sleeve-art'), armEl = $('armg');
 const root = document.documentElement;
 const SK = window.SceneKit, SC = window.SC;
 
@@ -12,27 +12,68 @@ let S = {
   primary: '#7c5cff', secondary: '#ff4fa3', offsetMs: 0, fontSize: 34, font: 'Segoe UI', bold: true,
   lyricStyle: 'classic', lyricAlign: 'center', nativeTheme: 'dark', lyricColor: 'white', shape: 'classic',
   lyricW: 760, lyricH: 170, pastLines: 0, futureLines: 1, lineBlur: false, fadeSec: 10, musicOnly: true,
-  showDisc: true, discSize: 200, lyricRot: 0, discRot: 0,
+  audioReactive: true, paused: false, pauseReason: null,
+  perf: { fpsCap: 60, glowQuality: 'medium', reducedEffects: false, ecoActive: false },
+  showDisc: true, discStyle: 'vinyl', discSize: 200, lyricRot: 0, discRot: 0,
   lyricPos: { x: innerWidth / 2, y: innerHeight * 0.84 }, discPos: { x: innerWidth * 0.11, y: innerHeight * 0.76 },
   origin: { x: 0, y: 0 }, virt: { x: 0, y: 0, w: innerWidth, h: innerHeight },
   here: { glow: true, primary: true, audioOwner: true, multiScreen: false }, editMode: false, preview: false,
 };
 const DEFAULT_S = S;
+const perfCfg = () => S.perf || { fpsCap: 60, glowQuality: 'medium', reducedEffects: false, ecoActive: false };
+const isLowFx = () => !!perfCfg().reducedEffects;
 let media = { none: true };
 let recvAt = 0;
 let lines = null;
 let albumColors = null;
+let lastArtB64 = null;
+let lastExtractedB64 = null;
+let lastActive = performance.now();
+let vis = 1;
+let initialized = false, hasSettings = false;
+let curGlowScale = 0.5, canvasCleared = false;
+let rafId = 0, fpsTimerId = 0, loopActive = false, sleepAudioTimer = null;
+let lastFrameAt = 0, lastRenderedAt = 0, accentTick = 0;
 
 // ---------- IPC ----------
-halo.on('settings', (s) => { S = Object.assign({}, DEFAULT_S, s); applyLayout(); });
+halo.on('settings', (s) => {
+  const wasPaused = !!S.paused;
+  hasSettings = true;
+  S = Object.assign({}, DEFAULT_S, s);
+  applyLayout();
+  if (S.paused) {
+    enterPaused();
+  } else {
+    if (wasPaused) exitPaused();
+    wakeLoop();
+  }
+});
 halo.on('live-pos', (d) => { if (d && d.key && d.pos) { S[d.key] = d.pos; applyLayout(); } });
-halo.on('live-box', (d) => { if (d) { S.lyricW = d.w; S.lyricH = d.h; applyLayout(); } });
-halo.on('media', (m) => { media = m; recvAt = performance.now(); });
-halo.on('lyrics', (l) => { lines = l.lines; });
+halo.on('live-box', (d) => { if (d) { S.lyricW = d.w; S.lyricH = d.h; applyLayout(); wakeLoop(); } });
+halo.on('media', (m) => {
+  media = m;
+  recvAt = performance.now();
+  if (media.playing) lastActive = recvAt;
+  if (!S.paused && !(media.none && vis === 0 && !S.editMode)) wakeLoop();
+});
+halo.on('lyrics', (l) => {
+  lines = l.lines;
+  if (!S.paused && (lines || S.editMode)) wakeLoop();
+});
 halo.on('art', (b64) => {
-  if (!b64) { labelEl.style.backgroundImage = ''; return; }
-  labelEl.style.backgroundImage = `url(data:image/jpeg;base64,${b64})`;
-  extractColors(b64);
+  lastArtB64 = b64 || null;
+  const url = b64 ? `url(data:image/jpeg;base64,${b64})` : '';
+  labelEl.style.backgroundImage = url;
+  artfullEl.style.backgroundImage = url;
+  sleeveArtEl.style.backgroundImage = url;
+  if (!b64) {
+    albumColors = null;
+    lastExtractedB64 = null;
+    applyLayout();
+  } else if (S.useAlbum || S.lyricColor === 'album') {
+    extractColors(b64);
+  }
+  if (!S.paused && b64) wakeLoop();
 });
 halo.on('audio-frame', (d) => {
   if (!d || S.here.audioOwner) return;
@@ -40,6 +81,10 @@ halo.on('audio-frame', (d) => {
   remoteAt = performance.now();
   if (d.bands && d.bands.length >= NB) {
     for (let i = 0; i < NB; i++) bands[i] = d.bands[i] / 255;
+  }
+  if (!S.paused && !S.musicOnly && remoteRaw > 0.04) {
+    lastActive = remoteAt;
+    wakeLoop();
   }
 });
 
@@ -75,14 +120,19 @@ function lyricRgb() {
   if (/^#[0-9a-f]{6}$/i.test(S.lyricColor)) return hexToRgb(S.lyricColor);
   return [255, 255, 255];
 }
+const curCssColors = { c1: '#7c5cff', c2: '#ff4fa3', on: '#ffffff', off: 'rgba(255,255,255,0.38)', glow: 'rgba(124,92,255,0.55)' };
 function setAccent() {
   const [p, s] = targetColors(performance.now());
-  root.style.setProperty('--c1', rgb(p));
-  root.style.setProperty('--c2', rgb(s));
-  root.style.setProperty('--glow', rgb(p, 0.55));
-  const on = lyricRgb();
-  root.style.setProperty('--ly-on', rgb(on));
-  root.style.setProperty('--ly-off', rgb(on, 0.38));
+  const c1 = rgb(p), c2 = rgb(s), glow = rgb(p, 0.55);
+  const onRgb = lyricRgb();
+  const on = rgb(onRgb), off = rgb(onRgb, 0.38);
+  curCssColors.c1 = c1; curCssColors.c2 = c2; curCssColors.glow = glow;
+  curCssColors.on = on; curCssColors.off = off;
+  root.style.setProperty('--c1', c1);
+  root.style.setProperty('--c2', c2);
+  root.style.setProperty('--glow', glow);
+  root.style.setProperty('--ly-on', on);
+  root.style.setProperty('--ly-off', off);
 }
 
 const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -120,10 +170,26 @@ function applyLayout() {
   playerEl.style.top = S.discPos.y - O.y + 'px';
   playerEl.style.setProperty('--d', S.discSize + 'px');
   playerEl.style.setProperty('--rot', (S.discRot || 0) + 'deg');
+  playerEl.dataset.disc = S.discStyle || 'vinyl';
   document.body.classList.toggle('edit', !!S.editMode);
   document.body.classList.toggle('bar', !!(S.editMode && S.here.primary));
+  document.body.classList.toggle('low-fx', isLowFx());
   tagEl.textContent = `Lyrics · ${Math.round(S.lyricW)} × ${Math.round(S.lyricH)}`;
   if (S.editMode !== lastEdit) { lastEdit = S.editMode; ignoring = true; drag = null; rs = null; }
+  if ((S.useAlbum || S.lyricColor === 'album') && lastArtB64 && lastExtractedB64 !== lastArtB64) {
+    extractColors(lastArtB64);
+  }
+  if (typeof glowScale === 'function' && glowScale() !== curGlowScale) resize();
+  if (analyser) {
+    const wantFft = isLowFx() ? 512 : 1024;
+    if (analyser.fftSize !== wantFft) {
+      try {
+        analyser.fftSize = wantFft;
+        freq = new Uint8Array(analyser.frequencyBinCount);
+        ensureBandTable(freq.length);
+      } catch { /* ignore */ }
+    }
+  }
   setAccent();
 }
 let ignoring = true;
@@ -229,14 +295,32 @@ const STALE_THRESHOLDS = [8000, 20000, 50000, 120000];
 const NB = 64;
 const bands = new Float32Array(NB);
 const relayBuf = new Uint8Array(NB);
+const bandLo = new Uint16Array(NB);
+const bandHi = new Uint16Array(NB);
+let bandTableBins = 0;
+
+function ensureBandTable(binCount) {
+  if (bandTableBins === binCount) return;
+  bandTableBins = binCount;
+  const scale = binCount / 512;
+  for (let i = 0; i < NB; i++) {
+    const a = Math.min(binCount - 1, Math.floor(Math.pow(372, i / NB) * scale));
+    const b = Math.min(binCount, Math.max(a + 1, Math.floor(Math.pow(372, (i + 1) / NB) * scale)));
+    bandLo[i] = a;
+    bandHi[i] = b;
+  }
+}
 
 let audioCtx = null, audioStream = null, audioOnlyStream = null, audioTrack = null, audioSource = null, audioGain = null;
-let analyser = null, freq = null, starting = false, queuedRestart = false, captureGen = 0;
-let retryAttempt = 0, remoteRaw = 0, remoteAt = 0, lastRelayAt = 0;
+let analyser = null, freq = null, starting = false, queuedRestart = false, captureGen = 0, audioSleeping = false;
+let retryAttempt = 0, remoteRaw = 0, remoteAt = 0, lastRelayAt = 0, sentSilentFrame = true;
 let silentSince = 0, staleRestarts = 0, lastTrackKey = null, wasPlaying = false;
+let idleStopAudioTimer = null;
 
 function stopAudio() {
   captureGen++;
+  audioSleeping = false;
+  if (idleStopAudioTimer) { clearTimeout(idleStopAudioTimer); idleStopAudioTimer = null; }
   const prevTrack = audioTrack;
   const prevCtx = audioCtx;
   audioTrack = null;
@@ -257,7 +341,39 @@ function stopAudio() {
   }
 }
 
+function sleepAudio() {
+  if (audioCtx && audioCtx.state === 'running') {
+    audioSleeping = true;
+    audioCtx.suspend().catch(() => {});
+  }
+  if (!idleStopAudioTimer && (audioCtx || audioStream)) {
+    idleStopAudioTimer = setTimeout(() => {
+      idleStopAudioTimer = null;
+      if (!loopActive && (S.paused || (vis === 0 && S.musicOnly))) {
+        stopAudio();
+      }
+    }, 60000);
+  }
+}
+
+function wakeAudio() {
+  if (idleStopAudioTimer) {
+    clearTimeout(idleStopAudioTimer);
+    idleStopAudioTimer = null;
+  }
+  audioSleeping = false;
+  if (hasSettings && S.here.audioOwner && S.audioReactive) {
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    } else if (!analyser && !starting) {
+      halo.send('audio-retry', { restart: false, delayMs: 0 });
+    }
+  }
+}
+
 async function startAudio(forceRestart = false) {
+  audioSleeping = false;
+  if (idleStopAudioTimer) { clearTimeout(idleStopAudioTimer); idleStopAudioTimer = null; }
   if (starting) { if (forceRestart) queuedRestart = true; return; }
   if (!forceRestart && analyser && audioTrack && audioTrack.readyState === 'live' && audioCtx) {
     if (audioCtx.state === 'running') return;
@@ -299,7 +415,7 @@ async function startAudio(forceRestart = false) {
 
     const src = ac.createMediaStreamSource(aOnly);
     const an = ac.createAnalyser();
-    an.fftSize = 1024;
+    an.fftSize = isLowFx() ? 512 : 1024;
     an.smoothingTimeConstant = 0.7;
     // Keep the Web Audio pull graph active with zero audible output.
     const gain = ac.createGain();
@@ -315,6 +431,7 @@ async function startAudio(forceRestart = false) {
     audioSource = src;
     audioGain = gain;
     freq = new Uint8Array(an.frequencyBinCount);
+    ensureBandTable(freq.length);
     analyser = an;
     retryAttempt = 0;
 
@@ -327,8 +444,9 @@ async function startAudio(forceRestart = false) {
     ac.onstatechange = () => {
       if (audioCtx !== ac) return;
       if (ac.state === 'suspended') {
+        if (audioSleeping) return;
         ac.resume().catch(() => {
-          if (audioCtx === ac && S.here.audioOwner) halo.send('audio-retry', { restart: false, delayMs: 1200 });
+          if (audioCtx === ac && S.here.audioOwner && !audioSleeping) halo.send('audio-retry', { restart: false, delayMs: 1200 });
         });
       } else if (ac.state === 'closed') {
         stopAudio();
@@ -369,24 +487,52 @@ if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
   });
 }
 
-function readEnergy() {
-  if (!analyser) { for (let i = 0; i < NB; i++) bands[i] *= 0.9; return 0; }
-  analyser.getByteFrequencyData(freq);
-  for (let i = 0; i < NB; i++) {
-    const a = Math.floor(Math.pow(372, i / NB));
-    const b = Math.max(a + 1, Math.floor(Math.pow(372, (i + 1) / NB)));
-    let m = 0;
-    for (let k = a; k < b && k < freq.length; k++) if (freq[k] > m) m = freq[k];
-    bands[i] = Math.max(m / 255, bands[i] * 0.86);
+function wantsBands() {
+  return S.shape === 'liquid' || S.shape === 'bars' || S.shape === 'aurora' || S.here.multiScreen;
+}
+
+function readEnergy(dt) {
+  const bandDecay = Math.pow(0.86, dt * 60);
+  if (!S.audioReactive) {
+    for (let i = 0; i < NB; i++) bands[i] *= bandDecay;
+    if (media.playing && !media.none) {
+      const t = performance.now() / 1000;
+      const e = 0.22 + 0.14 * (0.5 + 0.5 * Math.sin(t * 2.8)) + 0.06 * Math.sin(t * 6.3);
+      if (wantsBands()) {
+        for (let i = 0; i < NB; i++) {
+          const wave = 0.5 + 0.5 * Math.sin(t * 2.4 + i * 0.25);
+          bands[i] = e * (0.5 + 0.5 * wave);
+        }
+      }
+      return e;
+    }
+    return 0;
   }
+  if (!analyser) {
+    const idleDecay = Math.pow(0.9, dt * 60);
+    for (let i = 0; i < NB; i++) bands[i] *= idleDecay;
+    return 0;
+  }
+  analyser.getByteFrequencyData(freq);
+  ensureBandTable(freq.length);
+  if (wantsBands()) {
+    for (let i = 0; i < NB; i++) {
+      const a = bandLo[i], b = bandHi[i];
+      let m = 0;
+      for (let k = a; k < b; k++) if (freq[k] > m) m = freq[k];
+      bands[i] = Math.max(m / 255, bands[i] * bandDecay);
+    }
+  }
+  const bassEnd = Math.max(2, Math.round(8 * (freq.length / 512)));
+  const allEnd = Math.max(4, Math.min(freq.length, Math.round(120 * (freq.length / 512))));
   let bass = 0, all = 0;
-  for (let i = 1; i < 8; i++) bass += freq[i];
-  for (let i = 1; i < 120; i++) all += freq[i];
-  return Math.min(1, (bass / 7 / 255) * 0.7 + (all / 119 / 255) * 1.3);
+  for (let i = 1; i < bassEnd; i++) bass += freq[i];
+  for (let i = 1; i < allEnd; i++) all += freq[i];
+  return Math.min(1, (bass / (bassEnd - 1) / 255) * 0.7 + (all / (allEnd - 1) / 255) * 1.3);
 }
 
 function checkStaleAudio(now, raw) {
-  if (!S.here.audioOwner) { silentSince = 0; staleRestarts = 0; return; }
+  if (!S.here.audioOwner || !S.audioReactive) { silentSince = 0; staleRestarts = 0; return; }
   const key = media.none ? null : media.key;
   const playing = !!media.playing && !media.none;
   if (key !== lastTrackKey || (playing && !wasPlaying)) {
@@ -410,15 +556,20 @@ function checkStaleAudio(now, raw) {
 }
 
 // ---------- colours from the album cover ----------
+let colorCanvas = null, colorCtx = null;
 function extractColors(b64) {
+  lastExtractedB64 = b64;
   const img = new Image();
   img.onerror = () => console.error('cover image failed to decode');
   img.onload = () => {
-    const c = document.createElement('canvas');
-    c.width = c.height = 32;
-    const x = c.getContext('2d', { willReadFrequently: true });
-    x.drawImage(img, 0, 0, 32, 32);
-    const d = x.getImageData(0, 0, 32, 32).data;
+    if (!colorCanvas) {
+      colorCanvas = document.createElement('canvas');
+      colorCanvas.width = colorCanvas.height = 32;
+      colorCtx = colorCanvas.getContext('2d', { willReadFrequently: true });
+    }
+    colorCtx.clearRect(0, 0, 32, 32);
+    colorCtx.drawImage(img, 0, 0, 32, 32);
+    const d = colorCtx.getImageData(0, 0, 32, 32).data;
     const bins = new Map();
     for (let i = 0; i < d.length; i += 4) {
       const [h, s, v] = rgbToHsv(d[i], d[i + 1], d[i + 2]);
@@ -445,19 +596,30 @@ function extractColors(b64) {
 }
 
 // ---------- visibility (fade out after a pause) ----------
-let lastActive = performance.now();
-let vis = 1;
-function updateVis(now, raw) {
+function updateVis(now, raw, dt) {
   const active = !!media.playing || (!S.musicOnly && raw > 0.04);
   if (active) lastActive = now;
   const idleTooLong = S.fadeSec > 0 && now - lastActive > S.fadeSec * 1000;
-  const target = idleTooLong && !S.editMode && !S.preview ? 0 : 1;
-  vis += (target - vis) * (target ? 0.15 : 0.025);
-  if (vis < 0.005) vis = 0;
+  const target = idleTooLong && !S.editMode ? 0 : 1;
+  const k = 1 - Math.exp(-dt * (target ? 9.5 : 1.5));
+  vis += (target - vis) * k;
+  if (target === 0 && vis < 0.005) vis = 0;
+  else if (target === 1 && 1 - vis < 0.005) vis = 1;
 }
 
 // ---------- glow ----------
-function resize() { canvas.width = innerWidth; canvas.height = innerHeight; }
+function glowScale() {
+  const q = perfCfg().glowQuality;
+  return q === 'low' ? 0.35 : q === 'high' ? 1.0 : 0.5;
+}
+function resize() {
+  const sc = glowScale();
+  curGlowScale = sc;
+  canvas.width = Math.max(64, Math.round(innerWidth * sc));
+  canvas.height = Math.max(64, Math.round(innerHeight * sc));
+  canvasCleared = false;
+  if (initialized && !S.paused) wakeLoop();
+}
 addEventListener('resize', resize);
 resize();
 
@@ -466,7 +628,7 @@ let curS = hexToRgb('#ff4fa3');
 let level = 0;
 
 function eachEdge(fn) {
-  const w = canvas.width, h = canvas.height;
+  const w = innerWidth, h = innerHeight;
   const E = [[0, 0, 0, w], [w, 0, Math.PI / 2, h], [w, h, Math.PI, w], [0, h, -Math.PI / 2, h]];
   E.forEach(([x, y, r, len], i) => { ctx.save(); ctx.translate(x, y); ctx.rotate(r); fn(len, i); ctx.restore(); });
 }
@@ -477,17 +639,39 @@ function edgeGrad(len) {
 }
 const bandAt = (t) => bands[Math.min(NB - 1, Math.floor(Math.abs(2 * t - 1) * NB))];
 
-function drawClassic(now, rounded) {
-  const w = canvas.width, h = canvas.height;
+function drawClassic(now, rounded, sc, lowFx) {
+  const w = innerWidth, h = innerHeight;
   const a = now / 5000, cx = w / 2, cy = h / 2, r = Math.hypot(w, h) / 2;
   const g = ctx.createLinearGradient(cx - Math.cos(a) * r, cy - Math.sin(a) * r, cx + Math.cos(a) * r, cy + Math.sin(a) * r);
   g.addColorStop(0, rgb(curP)); g.addColorStop(0.5, rgb(curS)); g.addColorStop(1, rgb(curP));
   const lw = S.thickness * (1 + level * 1.2);
-  ctx.lineWidth = lw;
+  const baseAlpha = (0.45 + level * 0.55) * vis;
   ctx.strokeStyle = g;
+  if (lowFx) {
+    ctx.shadowBlur = 0;
+    const haloW = lw + (14 + level * 32) * S.glowSize;
+    ctx.lineWidth = haloW;
+    ctx.globalAlpha = baseAlpha * 0.28;
+    if (rounded) {
+      const inset = haloW / 2 + 4;
+      ctx.beginPath();
+      ctx.roundRect(inset, inset, w - inset * 2, h - inset * 2, 38);
+      ctx.stroke();
+    } else ctx.strokeRect(0, 0, w, h);
+    ctx.lineWidth = lw;
+    ctx.globalAlpha = baseAlpha;
+    if (rounded) {
+      const inset = lw / 2 + 6;
+      ctx.beginPath();
+      ctx.roundRect(inset, inset, w - inset * 2, h - inset * 2, 38);
+      ctx.stroke();
+    } else ctx.strokeRect(0, 0, w, h);
+    return;
+  }
+  ctx.lineWidth = lw;
   ctx.shadowColor = rgb(curP);
-  ctx.shadowBlur = (25 + level * 70) * S.glowSize;
-  ctx.globalAlpha = (0.45 + level * 0.55) * vis;
+  ctx.shadowBlur = (25 + level * 70) * S.glowSize * sc;
+  ctx.globalAlpha = baseAlpha;
   for (let i = 0; i < 2; i++) {
     if (rounded) {
       const inset = lw / 2 + 6;
@@ -503,16 +687,17 @@ function waveHeight(t, time, seed) {
   const wob = 7 * Math.sin(t * 13 + time * 1.7 + seed) + 5 * Math.sin(t * 29 - time * 2.3 + seed * 1.7);
   return Math.max(2, S.thickness * 2.2 + amp * body + wob);
 }
-function drawLiquid(now) {
+function drawLiquid(now, sc, lowFx) {
   const time = now / 1000;
+  const layers = lowFx ? 1 : 2;
   eachEdge((len, i) => {
-    for (let layer = 0; layer < 2; layer++) {
+    ctx.shadowColor = rgb(curP);
+    ctx.shadowBlur = lowFx ? 0 : 22 * S.glowSize * sc;
+    ctx.fillStyle = edgeGrad(len);
+    const step = Math.max(lowFx ? 20 : 12, len / (lowFx ? 48 : 80));
+    for (let layer = 0; layer < layers; layer++) {
       const k = layer ? 0.7 : 1;
       ctx.globalAlpha = (layer ? 0.45 : 0.85) * vis * (0.65 + 0.35 * level);
-      ctx.fillStyle = edgeGrad(len);
-      ctx.shadowColor = rgb(curP);
-      ctx.shadowBlur = 22 * S.glowSize;
-      const step = Math.max(8, len / 90);
       ctx.beginPath();
       ctx.moveTo(0, 0);
       let px = 0, py = waveHeight(0, time + layer * 1.3, i + layer * 3) * k;
@@ -527,40 +712,48 @@ function drawLiquid(now) {
     }
   });
 }
-function drawBars(now) {
+function drawBars(now, sc, lowFx) {
   ctx.shadowColor = rgb(curP);
-  ctx.shadowBlur = 12 * S.glowSize;
+  ctx.shadowBlur = lowFx ? 0 : 12 * S.glowSize * sc;
   ctx.globalAlpha = (0.55 + level * 0.45) * vis;
   eachEdge((len) => {
-    const n = len > 1500 ? 72 : 56, slot = len / n, bw = Math.max(3, slot * 0.62);
+    const n = len > 1500 ? (lowFx ? 56 : 72) : (lowFx ? 42 : 56);
+    const slot = len / n, bw = Math.max(3, slot * 0.62);
     ctx.fillStyle = edgeGrad(len);
+    ctx.beginPath();
     for (let b = 0; b < n; b++) {
       const t = (b + 0.5) / n;
       const v = bands[Math.min(NB - 1, Math.floor(t * NB * 0.85))];
       const hgt = S.thickness * 1.2 + v * (70 + 90 * S.glowSize) + 3 * Math.sin(now / 400 + b);
-      ctx.beginPath();
       ctx.roundRect(b * slot + (slot - bw) / 2, 0, bw, hgt, bw / 2);
-      ctx.fill();
     }
+    ctx.fill();
   });
 }
-function drawAurora(now) {
+function drawAurora(now, sc, lowFx) {
   const time = now / 1000;
   ctx.globalCompositeOperation = 'lighter';
   const depth = (80 + level * 190) * S.glowSize + S.thickness * 3;
+  const gp = ctx.createLinearGradient(0, 0, 0, depth);
+  gp.addColorStop(0, rgb(curP, 0.55)); gp.addColorStop(1, rgb(curP, 0));
+  const gs = ctx.createLinearGradient(0, 0, 0, depth);
+  gs.addColorStop(0, rgb(curS, 0.55)); gs.addColorStop(1, rgb(curS, 0));
+  const layers = lowFx ? 2 : 3;
+  ctx.globalAlpha = (0.5 + level * 0.4) * vis;
   eachEdge((len, i) => {
-    for (let layer = 0; layer < 3; layer++) {
-      const col = layer % 2 ? curS : curP;
-      const g = ctx.createLinearGradient(0, 0, 0, depth);
-      g.addColorStop(0, rgb(col, 0.55)); g.addColorStop(1, rgb(col, 0));
-      ctx.fillStyle = g;
-      ctx.globalAlpha = (0.5 + level * 0.4) * vis;
+    const step = Math.max(lowFx ? 26 : 16, len / (lowFx ? 40 : 75));
+    for (let layer = 0; layer < layers; layer++) {
+      ctx.fillStyle = layer % 2 ? gs : gp;
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      for (let x = 0; x <= len; x += 14) {
+      for (let x = 0; x <= len; x += step) {
         const t = x / len;
         const swell = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * (5 + layer * 2) + time * (0.55 + 0.25 * layer) + layer * 2 + i));
         ctx.lineTo(x, depth * swell * (0.75 + 0.5 * bandAt(t)));
+      }
+      if (len % step !== 0) {
+        const swell = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin((5 + layer * 2) + time * (0.55 + 0.25 * layer) + layer * 2 + i));
+        ctx.lineTo(len, depth * swell * (0.75 + 0.5 * bandAt(1)));
       }
       ctx.lineTo(len, 0); ctx.closePath(); ctx.fill();
     }
@@ -568,37 +761,56 @@ function drawAurora(now) {
   ctx.globalCompositeOperation = 'source-over';
 }
 function drawCorners(now) {
-  const w = canvas.width, h = canvas.height;
+  const w = innerWidth, h = innerHeight;
   const R = (220 + level * 420) * S.glowSize + S.thickness * 6;
   const corners = [[0, 0, curP], [w, 0, curS], [w, h, curP], [0, h, curS]];
   ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = (0.5 + level * 0.5) * vis;
   corners.forEach(([x, y, col], i) => {
     const pulse = 0.75 + 0.25 * Math.sin(now / 700 + i * 1.6);
-    const g = ctx.createRadialGradient(x, y, 0, x, y, R * pulse);
+    const rad = R * pulse;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
     g.addColorStop(0, rgb(col, 0.85)); g.addColorStop(0.45, rgb(col, 0.3)); g.addColorStop(1, rgb(col, 0));
-    ctx.globalAlpha = (0.5 + level * 0.5) * vis;
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
+    const rx = Math.max(0, x - rad), ry = Math.max(0, y - rad);
+    const rw = Math.min(w, x + rad) - rx, rh = Math.min(h, y + rad) - ry;
+    if (rw > 0 && rh > 0) ctx.fillRect(rx, ry, rw, rh);
   });
   ctx.globalCompositeOperation = 'source-over';
 }
-function drawGlow(now, raw) {
-  const w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-  if (!S.glow || !S.here.glow || vis === 0) return;
+function drawGlow(now, raw, dt) {
+  if (!S.glow || !S.here.glow || vis === 0) {
+    if (!S.glow || !S.here.glow) level = 0;
+    if (!canvasCleared) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      canvasCleared = true;
+    }
+    return;
+  }
+  canvasCleared = false;
+  const sc = curGlowScale;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(sc, 0, 0, sc, 0, 0);
+
   let energy = (!S.musicOnly || media.playing) ? raw : 0;
   if (energy < 0.03 && S.idleGlow) energy = 0.12 + 0.05 * Math.sin(now / 900);
-  level = Math.max(energy, level * 0.88);
+  level = Math.max(energy, level * Math.pow(0.88, dt * 60));
+  if (level < 0.001 && energy === 0) level = 0;
+
   const [tp, ts] = targetColors(now);
-  for (let i = 0; i < 3; i++) { curP[i] = lerp(curP[i], tp[i], 0.06); curS[i] = lerp(curS[i], ts[i], 0.06); }
+  const cLerp = 1 - Math.exp(-dt * 3.7);
+  for (let i = 0; i < 3; i++) { curP[i] = lerp(curP[i], tp[i], cLerp); curS[i] = lerp(curS[i], ts[i], cLerp); }
+  const lowFx = isLowFx();
   ctx.save();
   switch (S.shape) {
-    case 'rounded': drawClassic(now, true); break;
-    case 'liquid': drawLiquid(now); break;
-    case 'bars': drawBars(now); break;
-    case 'aurora': drawAurora(now); break;
+    case 'rounded': drawClassic(now, true, sc, lowFx); break;
+    case 'liquid': drawLiquid(now, sc, lowFx); break;
+    case 'bars': drawBars(now, sc, lowFx); break;
+    case 'aurora': drawAurora(now, sc, lowFx); break;
     case 'corners': drawCorners(now); break;
-    default: drawClassic(now, false);
+    default: drawClassic(now, false, sc, lowFx);
   }
   ctx.restore();
   ctx.globalAlpha = 1;
@@ -606,18 +818,32 @@ function drawGlow(now, raw) {
 
 // ---------- record player ----------
 let ang = 0, spin = 0, armA = -50, lastT = performance.now();
-function updateDisc(now) {
-  const dt = Math.min(0.1, (now - lastT) / 1000);
+let lastPlayerOpa = -1, lastPlayerVis = null, lastRecRot = '', lastArmRot = '', lastDiscPlaying = null;
+function updateDisc(now, dt) {
   lastT = now;
-  const show = S.showDisc && (!media.none || S.editMode || S.preview);
-  playerEl.style.opacity = show ? vis : 0;
-  if (!show) return;
+  const show = S.showDisc && (!media.none || S.editMode);
+  const opa = show ? vis : 0;
+  const visible = opa > 0;
+  if (opa !== lastPlayerOpa) { lastPlayerOpa = opa; playerEl.style.opacity = opa; }
+  if (visible !== lastPlayerVis) { lastPlayerVis = visible; playerEl.style.visibility = visible ? '' : 'hidden'; }
+  if (!show || !visible) {
+    if (!show) { spin = 0; armA = -50; }
+    return true;
+  }
   const playing = !!media.playing;
-  spin += ((playing ? 200 : 0) - spin) * Math.min(1, dt * 2.2);
+  if (playing !== lastDiscPlaying) { lastDiscPlaying = playing; playerEl.classList.toggle('playing', playing); }
+  const targetSpin = playing ? 200 : 0;
+  spin += (targetSpin - spin) * Math.min(1, dt * 2.2);
+  if (!playing && spin < 0.05) spin = 0;
   ang = (ang + spin * dt) % 360;
-  recordEl.style.transform = `rotate(${ang.toFixed(2)}deg)`;
-  armA += ((playing ? 0 : -50) - armA) * Math.min(1, dt * 3);
-  armEl.setAttribute('transform', `rotate(${armA.toFixed(2)} 112 -6)`);
+  const recRot = `rotate(${ang.toFixed(2)}deg)`;
+  if (recRot !== lastRecRot) { lastRecRot = recRot; recordEl.style.transform = recRot; }
+  const targetArm = playing ? 0 : -50;
+  armA += (targetArm - armA) * Math.min(1, dt * 3);
+  if (Math.abs(targetArm - armA) < 0.05) armA = targetArm;
+  const armRot = `rotate(${armA.toFixed(2)} 112 -6)`;
+  if (armRot !== lastArmRot) { lastArmRot = armRot; armEl.setAttribute('transform', armRot); }
+  return !playing && spin === 0 && armA === targetArm;
 }
 
 // ======================================================================
@@ -643,7 +869,8 @@ function position() {
 // ----- list styles: every line lives in a scrolling track, Spotify-style -----
 let listL = null, lineEls = [];
 let activeIdx = -2, activeWords = [], big = null, bigIdx = -2, activeStyle = '';
-let trackY = 0, placed = false, lastRange = [0, -1], lastLayoutSig = '';
+let trackY = 0, cachedTrackTargetY = 0, lastTrackTransform = '', lastBigTransform = '', lastBeatTransform = '';
+let placed = false, lastRange = [0, -1], lastLayoutSig = '';
 
 function fillPlain(rec) {
   rec.inn.textContent = '';
@@ -652,7 +879,9 @@ function fillPlain(rec) {
 function buildList(L) {
   trackEl.textContent = '';
   lineEls = [];
-  activeIdx = -2; activeWords = []; big = null; placed = false; lastRange = [0, -1]; lastLayoutSig = '';
+  activeIdx = -2; activeWords = []; big = null; placed = false;
+  cachedTrackTargetY = 0; lastTrackTransform = ''; lastBigTransform = ''; lastBeatTransform = '';
+  lastRange = [0, -1]; lastLayoutSig = '';
   L.forEach((line, i) => {
     const el = document.createElement('div');
     el.className = 'ln' + (line.text ? '' : ' empty');
@@ -669,7 +898,7 @@ function buildList(L) {
 function deactivate() {
   const r = lineEls[activeIdx];
   if (r) { r.el.classList.remove('cur', 'kin', 'grad'); r.inn.style.transform = ''; if (!r.empty) fillPlain(r); }
-  activeWords = []; big = null; bigIdx = -2;
+  activeWords = []; big = null; bigIdx = -2; lastBigTransform = ''; lastBeatTransform = '';
 }
 function activate(idx, style) {
   deactivate();
@@ -761,13 +990,25 @@ function layoutLines(idx) {
 }
 
 let dtLast = performance.now();
-function updateList(L, pos, now, idx, style, demo) {
-  if (L !== listL) buildList(L);
+function updateList(L, pos, now, idx, style, demo, dt) {
+  const rebuilt = L !== listL;
+  if (rebuilt) buildList(L);
   trackEl.classList.toggle('sp', style === 'spotlight');
   stageEl.classList.toggle('fade', (S.pastLines | 0) + (S.futureLines | 0) > 0);
   const sig = [idx, style, S.pastLines, S.futureLines, S.lineBlur, S.lyricH, S.lyricW, S.fontSize, S.font, S.bold, S.lyricAlign].join('|');
   if (idx !== activeIdx || style !== activeStyle) activate(idx, style);
-  if (sig !== lastLayoutSig) { lastLayoutSig = sig; layoutLines(idx); }
+  const layoutChanged = rebuilt || sig !== lastLayoutSig;
+  if (layoutChanged) {
+    lastLayoutSig = sig;
+    layoutLines(idx);
+    const cur = idx >= 0 ? lineEls[idx] : lineEls[0];
+    if (cur) {
+      const mid = cur.el.offsetTop + cur.el.offsetHeight / 2 + (idx < 0 ? cur.el.offsetHeight : 0);
+      cachedTrackTargetY = S.lyricH / 2 - mid;
+    } else {
+      cachedTrackTargetY = 0;
+    }
+  }
 
   for (const w of activeWords) animateWord(w, pos, now, style);
   const rec = lineEls[activeIdx];
@@ -775,28 +1016,37 @@ function updateList(L, pos, now, idx, style, demo) {
     let ai = -1;
     for (let i = 0; i < activeWords.length; i++) if (pos >= activeWords[i].start) ai = i;
     if (ai !== bigIdx) { bigIdx = ai; big.textContent = ai >= 0 ? activeWords[ai].el.textContent : ''; }
-    if (ai >= 0) big.style.transform = `scale(${(1 + 0.4 * Math.exp(-(pos - activeWords[ai].start) / 170)).toFixed(3)})`;
+    if (ai >= 0) {
+      const btf = `scale(${(1 + 0.4 * Math.exp(-(pos - activeWords[ai].start) / 170)).toFixed(3)})`;
+      if (btf !== lastBigTransform) { lastBigTransform = btf; big.style.transform = btf; }
+    }
   }
   if (style === 'beat' && rec && !rec.empty) {
     let e = Math.max(level, lastRaw);
     if (demo) e = Math.max(e, 0.55 * Math.pow(Math.max(0, Math.sin(now / 230)), 6));
     const jitter = e > 0.75 ? (Math.random() - 0.5) * 1.4 : 0;
-    rec.inn.style.transform = `scale(${(1 + e * 0.2).toFixed(3)}) rotate(${jitter.toFixed(2)}deg)`;
+    const bt = `scale(${(1 + e * 0.2).toFixed(3)}) rotate(${jitter.toFixed(2)}deg)`;
+    if (bt !== lastBeatTransform) { lastBeatTransform = bt; rec.inn.style.transform = bt; }
   }
-  // keep the current line in the middle of the box
+  // keep the current line in the middle of the box without forcing reflow every frame
   const cur = idx >= 0 ? lineEls[idx] : lineEls[0];
+  let trackSettled = true;
   if (cur) {
-    const mid = cur.el.offsetTop + cur.el.offsetHeight / 2 + (idx < 0 ? cur.el.offsetHeight : 0);
-    const target = S.lyricH / 2 - mid;
-    const dt = Math.min(0.1, (now - dtLast) / 1000);
-    if (!placed) { trackY = target; placed = true; } else trackY += (target - trackY) * (1 - Math.exp(-dt * 9));
-    trackEl.style.transform = `translateY(${trackY.toFixed(1)}px)`;
+    const target = cachedTrackTargetY;
+    if (!placed) { trackY = target; placed = true; }
+    else trackY += (target - trackY) * (1 - Math.exp(-dt * 9));
+    if (Math.abs(target - trackY) < 0.25) trackY = target;
+    else trackSettled = false;
+    const tf = `translateY(${trackY.toFixed(1)}px)`;
+    if (tf !== lastTrackTransform) { lastTrackTransform = tf; trackEl.style.transform = tf; }
   }
+  return trackSettled && style !== 'wave' && !(style === 'beat' && level >= 0.003);
 }
 
 // ----- scene styles (scenes.js) -----
 let scene = null, sceneKey = '', sceneL = null;
 const NATIVE = new Set(['chat', 'money', 'map', 'notify', 'code', 'codeVisual']);
+const STATIC_SCENES = new Set(['code', 'codeVisual', 'branches', 'web', 'visual', 'chat']);
 function ensureScene(L, style, demo) {
   if (scene && sceneL === L && sceneKey === style) return;
   if (scene && scene.destroy) scene.destroy();
@@ -808,6 +1058,7 @@ function ensureScene(L, style, demo) {
     L, demo,
     S: () => S, W: () => S.lyricW, H: () => S.lyricH,
     media: () => media, level: () => level,
+    colors: () => curCssColors, perf: perfCfg,
   };
   scene = SC[style](sceneEl, env);
   stageEl.classList.toggle('isScene', NATIVE.has(style));
@@ -824,54 +1075,202 @@ function setMode(isScene) {
 }
 
 let lastRaw = 0;
-function updateLyrics(now) {
+let lastLyricsOpa = -1, lastLyricsVis = null;
+function setLyricsVis(opa, visible) {
+  if (opa !== lastLyricsOpa) { lastLyricsOpa = opa; lyricsEl.style.opacity = opa; }
+  if (visible !== lastLyricsVis) { lastLyricsVis = visible; lyricsEl.style.visibility = visible ? '' : 'hidden'; }
+}
+function updateLyrics(now, dt) {
   const real = lines && lines.length && !media.none;
-  const demo = !real && (S.editMode || S.preview);
+  const demo = !real && S.editMode;
   const L = real ? lines : demo ? DEMO : null;
-  if (!L) { lyricsEl.style.opacity = 0; return; }
+  if (!L) { setLyricsVis(0, false); return true; }
   const style = S.lyricStyle || 'classic';
   const pos = real ? position() : now % DEMO_LOOP;
-  lyricsEl.style.opacity = S.editMode ? (S.lyrics ? 1 : 0.35) : (S.lyrics ? vis : 0);
-  if (!S.lyrics && !S.editMode) return;
+  const opa = S.editMode ? (S.lyrics ? 1 : 0.35) : (S.lyrics ? vis : 0);
+  const visible = opa > 0;
+  setLyricsVis(opa, visible);
+  if ((!S.lyrics && !S.editMode) || !visible) return true;
 
   let idx = -1;
   { let lo = 0, hi = L.length - 1; while (lo <= hi) { const m = (lo + hi) >> 1; if (L[m].t <= pos) { idx = m; lo = m + 1; } else hi = m - 1; } }
 
   const isScene = !!SC[style];
   if (isScene === (trackEl.style.display === 'none')) { /* mode already right */ } else setMode(isScene);
+  let settled = true;
   if (isScene) {
     ensureScene(L, style, demo);
     stageEl.classList.remove('fade');
     scene.update(pos, now, idx);
+    settled = STATIC_SCENES.has(style);
   } else {
-    updateList(L, pos, now, idx, style, demo);
+    settled = updateList(L, pos, now, idx, style, demo, dt);
   }
   dtLast = now;
+  return settled;
 }
 
-let accentTick = 0;
+// ---------- FPS cap + sleep/wake loop ----------
+
+function cancelLoopTimers() {
+  if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+  if (fpsTimerId) { clearTimeout(fpsTimerId); fpsTimerId = 0; }
+}
+function stopSleepAudioWatch() {
+  if (sleepAudioTimer) { clearInterval(sleepAudioTimer); sleepAudioTimer = null; }
+}
+function startSleepAudioWatch() {
+  if (sleepAudioTimer || S.paused || S.musicOnly || !S.audioReactive || !S.here.audioOwner) return;
+  sleepAudioTimer = setInterval(() => {
+    if (S.paused || S.musicOnly || !S.audioReactive || !S.here.audioOwner) { stopSleepAudioWatch(); return; }
+    if (!analyser || !freq) return;
+    analyser.getByteFrequencyData(freq);
+    const bassEnd = Math.max(2, Math.round(8 * (freq.length / 512)));
+    const allEnd = Math.max(4, Math.min(freq.length, Math.round(120 * (freq.length / 512))));
+    let bass = 0, all = 0;
+    for (let i = 1; i < bassEnd; i++) bass += freq[i];
+    for (let i = 1; i < allEnd; i++) all += freq[i];
+    const raw = Math.min(1, (bass / (bassEnd - 1) / 255) * 0.7 + (all / (allEnd - 1) / 255) * 1.3);
+    if (raw > 0.04) {
+      lastActive = performance.now();
+      wakeLoop();
+    }
+  }, 250);
+}
+function enterPaused() {
+  cancelLoopTimers();
+  stopSleepAudioWatch();
+  loopActive = false;
+  vis = 0;
+  document.body.classList.add('paused');
+  if (!canvasCleared) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    canvasCleared = true;
+  }
+  if (lastPlayerOpa !== 0) { lastPlayerOpa = 0; playerEl.style.opacity = 0; }
+  if (lastPlayerVis !== false) { lastPlayerVis = false; playerEl.style.visibility = 'hidden'; }
+  setLyricsVis(0, false);
+}
+function exitPaused() {
+  document.body.classList.remove('paused', 'sleeping');
+  const now = performance.now();
+  lastActive = now;
+  dtLast = now;
+  lastT = now;
+  lastFrameAt = 0;
+  lastRenderedAt = 0;
+}
+function sleepLoop() {
+  cancelLoopTimers();
+  loopActive = false;
+  document.body.classList.add('sleeping');
+  if (!S.paused && vis === 0 && S.musicOnly) {
+    sleepAudio();
+  } else if (!S.paused && !S.musicOnly && S.audioReactive && S.here.audioOwner) {
+    startSleepAudioWatch();
+  }
+}
+function wakeLoop() {
+  if (S.paused) return;
+  stopSleepAudioWatch();
+  document.body.classList.remove('sleeping');
+  wakeAudio();
+  if (loopActive) return;
+  loopActive = true;
+  const now = performance.now();
+  dtLast = now;
+  lastT = now;
+  lastFrameAt = 0;
+  lastRenderedAt = 0;
+  rafId = requestAnimationFrame(frame);
+}
+function scheduleNext(now) {
+  if (!loopActive || S.paused) return;
+  const cfgCap = perfCfg().fpsCap;
+  const idleOrFading = !media.playing && !S.editMode;
+  let effCap = cfgCap;
+  if (idleOrFading) effCap = effCap > 0 ? Math.min(effCap, 30) : 30;
+  if (!effCap) {
+    rafId = requestAnimationFrame(frame);
+    return;
+  }
+  const interval = 1000 / effCap;
+  const elapsed = lastRenderedAt ? now - lastRenderedAt : 0;
+  const wait = interval - elapsed - 12;
+  if (wait <= 6) {
+    rafId = requestAnimationFrame(frame);
+  } else {
+    fpsTimerId = setTimeout(() => {
+      fpsTimerId = 0;
+      if (loopActive && !S.paused) rafId = requestAnimationFrame(frame);
+    }, wait);
+  }
+}
+
 function frame(now) {
-  requestAnimationFrame(frame);
+  rafId = 0;
+  if (!loopActive || S.paused) return;
+
+  const cfgCap = perfCfg().fpsCap;
+  const idleOrFading = !media.playing && !S.editMode;
+  const effCap = idleOrFading ? (cfgCap > 0 ? Math.min(cfgCap, 30) : 30) : cfgCap;
+  if (effCap > 0 && lastRenderedAt && now - lastRenderedAt < (1000 / effCap) - 4) {
+    scheduleNext(now);
+    return;
+  }
+
+  const dt = lastFrameAt ? Math.min(0.1, Math.max(0.001, (now - lastFrameAt) / 1000)) : 0.016;
+  lastFrameAt = now;
+  lastRenderedAt = now;
+
   let raw = 0;
   if (S.here.audioOwner) {
-    raw = readEnergy();
+    raw = readEnergy(dt);
     checkStaleAudio(now, raw);
     if (S.here.multiScreen && now - lastRelayAt > 32) {
       lastRelayAt = now;
-      for (let i = 0; i < NB; i++) relayBuf[i] = Math.round(clamp01(bands[i]) * 255);
-      halo.send('audio-frame', { raw, bands: relayBuf });
+      let maxBand = 0;
+      for (let i = 0; i < NB; i++) {
+        const v = Math.round(clamp01(bands[i]) * 255);
+        relayBuf[i] = v;
+        if (v > maxBand) maxBand = v;
+      }
+      const isSilent = raw < 0.001 && maxBand === 0;
+      if (!isSilent) {
+        sentSilentFrame = false;
+        halo.send('audio-frame', { raw, bands: relayBuf });
+      } else if (!sentSilentFrame) {
+        sentSilentFrame = true;
+        halo.send('audio-frame', { raw: 0, bands: relayBuf });
+      }
     }
   } else if (S.here.glow || S.lyricStyle === 'beat') {
     if (now - remoteAt <= 250) raw = remoteRaw;
-    else { for (let i = 0; i < NB; i++) bands[i] *= 0.9; }
+    else {
+      const idleDecay = Math.pow(0.9, dt * 60);
+      for (let i = 0; i < NB; i++) bands[i] *= idleDecay;
+    }
   }
   lastRaw = raw;
-  updateVis(now, raw);
-  drawGlow(now, raw);
-  updateDisc(now);
-  updateLyrics(now);
-  if ((S.rainbow || (S.useAlbum && albumColors)) && now - accentTick > 400) { accentTick = now; setAccent(); }
+  updateVis(now, raw, dt);
+  drawGlow(now, raw, dt);
+  const discSettled = updateDisc(now, dt);
+  const trackSettled = updateLyrics(now, dt);
+  if (S.rainbow && vis > 0 && now - accentTick > 400) { accentTick = now; setAccent(); }
+
+  const fullyStatic = !media.playing && !S.editMode && vis === 1 &&
+    (!S.glow || !S.here.glow || !S.idleGlow) &&
+    !S.rainbow && discSettled && level < 0.003 && trackSettled;
+
+  if (S.paused || (vis === 0 && !S.editMode) || fullyStatic) {
+    sleepLoop();
+    return;
+  }
+  scheduleNext(performance.now());
 }
+initialized = true;
 applyLayout();
 setMode(false);
-requestAnimationFrame(frame);
+if (S.paused) enterPaused();
+else wakeLoop();

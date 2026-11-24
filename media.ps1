@@ -83,6 +83,8 @@ $mgrType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManag
 $mgr = Await ($mgrType::RequestAsync()) $mgrType
 $propsType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties]
 $wantThumb = ''
+$idle = $false
+$lastJson = ''
 [HaloStdin]::Start()
 
 while ($true) {
@@ -90,16 +92,23 @@ while ($true) {
     while ([HaloStdin]::Lines.TryDequeue([ref]$cmdLine)) {
         if ($cmdLine.StartsWith('thumb:')) {
             $wantThumb = $cmdLine.Substring(6)
+        } elseif ($cmdLine -eq 'idle:1') {
+            $idle = $true
+        } elseif ($cmdLine -eq 'idle:0') {
+            $idle = $false
         }
     }
     if ([HaloStdin]::Eof) { break }
 
+    $sleepMs = if ($idle) { 2000 } else { 1200 }
     try {
         $cur = $null
         try { $cur = $mgr.GetCurrentSession() } catch { }
         $curApp = if ($cur) { [string]$cur.SourceAppUserModelId } else { '' }
         $all = $mgr.GetSessions()
         $list = [System.Collections.Generic.List[object]]::new()
+        $anyPlaying = $false
+        $attachedThumb = $false
 
         foreach ($x in $all) {
             try {
@@ -111,6 +120,7 @@ while ($true) {
                 $album = [string]$props.AlbumTitle
                 $key = "$appId|$artist|$title"
                 $playing = ($pb.PlaybackStatus.ToString() -eq 'Playing')
+                if ($playing) { $anyPlaying = $true }
                 $typeStr = if ($pb.PlaybackType) {
                     $pb.PlaybackType.ToString()
                 } elseif ($props.PlaybackType) {
@@ -145,9 +155,12 @@ while ($true) {
                     hasThumb = ($null -ne $props.Thumbnail)
                 }
 
-                if ($wantThumb -and $wantThumb -eq $key) {
+                if (-not $idle -and $wantThumb -and $wantThumb -eq $key) {
                     $art = Get-Thumbnail $props
-                    if ($art) { $o.art = $art }
+                    if ($art) {
+                        $o.art = $art
+                        $attachedThumb = $true
+                    }
                     $wantThumb = ''
                 }
 
@@ -157,11 +170,33 @@ while ($true) {
             }
         }
 
-        $payload = [ordered]@{ sessions = $list.ToArray() }
-        [Console]::Out.WriteLine(($payload | ConvertTo-Json -Compress -Depth 4))
-        [Console]::Out.Flush()
+        if ($list.Count -eq 0) {
+            $json = '{"sessions":[]}'
+            if ($json -ne $lastJson) {
+                [Console]::Out.WriteLine($json)
+                [Console]::Out.Flush()
+                $lastJson = $json
+            }
+            $sleepMs = if ($idle) { 2000 } else { 1500 }
+        } else {
+            $payload = [ordered]@{ sessions = $list.ToArray() }
+            $json = $payload | ConvertTo-Json -Compress -Depth 4
+            if ($anyPlaying -and -not $idle) {
+                [Console]::Out.WriteLine($json)
+                [Console]::Out.Flush()
+                $lastJson = $json
+                $sleepMs = 500
+            } else {
+                if ($attachedThumb -or $json -ne $lastJson) {
+                    [Console]::Out.WriteLine($json)
+                    [Console]::Out.Flush()
+                    $lastJson = $json
+                }
+                $sleepMs = if ($idle) { 2000 } else { 1200 }
+            }
+        }
     } catch {
         [Console]::Error.WriteLine("loop: $($_.Exception.Message)")
     }
-    Start-Sleep -Milliseconds 400
+    Start-Sleep -Milliseconds $sleepMs
 }

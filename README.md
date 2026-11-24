@@ -14,7 +14,7 @@ npm start
 ```
 If `npm start` says "Electron failed to install correctly", run `npm run fix-electron` (downloads Electron directly from GitHub), then `npm start` again. If it still fails, add an antivirus exclusion for the folder.
 
-The settings window opens by itself the first time. After that, click the Halo icon in the system tray (check the ^ overflow), or right-click it for quick toggles. The terminal prints what Halo detects (`[media]`, `[lyrics]`, `[art]`, `[fonts]`).
+The settings window opens alongside the desktop overlay when you launch Halo, and stays accessible from the Halo icon in the system tray (check the ^ overflow). The terminal prints what Halo detects (`[media]`, `[lyrics]`, `[art]`, `[fonts]`).
 
 ## Settings window
 
@@ -25,11 +25,12 @@ The settings window opens by itself the first time. After that, click the Halo i
   - Native design (keep their own colours): Messages, Payments, Map, Notifications.
 - **Lyrics**: any installed font (scrollable picker, each name shown in its own font), bold, size, left / centre / right alignment, colour, lines before and after the current one (Spotify-style, with optional blur), box width and height, timing offset.
 - **Glow**: shape, thickness, spread, colour source (album art, rainbow, presets, your own two colours), which screens get it.
-- **Record**: show, size, rotation.
+- **Record**: six styles (Classic Vinyl, Picture Disc, Neon Acrylic, Holographic CD, Turntable Deck, Album Sleeve), show, size, rotation.
 - **Layout**: edit on screen, lyric rotation, reset positions, layer (behind or above apps), fade-after-pause seconds (0 = never), only react to music (ignores Shorts, Reels and other browser videos).
-- **General**: start with Windows (installed build only), shortcuts, quit.
+- **Performance**: quick presets (High quality, Balanced, Low-end / Eco), automatic pausing in fullscreen or behind maximized windows, battery eco/pause mode, frame rate limit, glow resolution scaling, Lite mode (reduced effects), and audio-capture toggle.
+- **General**: start with Windows (installed build only), start minimized to tray, automatic GitHub updates, shortcuts, quit.
 
-While the settings window is open and nothing is playing, your screen shows a sample song so you can preview each style. (It sits on the desktop layer, so set Layout > Layer to "Above apps", or use Edit on screen, if windows are covering it.)
+When you turn on **Edit on screen** (`Ctrl+Alt+L`) while nothing is playing, your screen shows a sample song so you can preview each style and position the overlay. (It sits on the desktop layer, so set Layout > Layer to "Above apps", or use Edit on screen, if windows are covering it.)
 
 ## Edit on screen (Ctrl+Alt+L, or the button in the settings window)
 
