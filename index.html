@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Halo — Cinematic Desktop Light, 21 Synced Lyric Styles &amp; Vinyl Overlay for Windows</title>
-  <meta name="description" content="Free open-source Windows desktop ambient music engine: 6 music-reactive screen-edge glow sculptures, 21 synced lyric styles, and 6 spinning record players. Releasing November 26, 2026.">
-  <meta name="theme-color" content="#020205">
+  <title>Halo — Music-Reactive Edge Glow, 21 Synced Lyric Styles &amp; Record Overlay for Windows</title>
+  <meta name="description" content="Free open-source Windows desktop music overlay with 6 edge glow shapes, 21 synced lyric styles, and 6 spinning record players.">
+  <meta name="theme-color" content="#040407">
   <link rel="icon" type="image/png" href="build/logo.png">
   <link rel="preload" href="fonts/GoogleSans.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="site.css">
@@ -13,782 +13,409 @@
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
 
-  <!-- Film-grain darkroom texture & ambient outer screen-edge glow -->
-  <div class="cinema-grain" aria-hidden="true"></div>
-  <canvas id="site-glow" aria-hidden="true"></canvas>
+  <div class="ambient-backdrop" aria-hidden="true">
+    <span class="ambient-orb orb-a"></span>
+    <span class="ambient-orb orb-b"></span>
+    <span class="ambient-orb orb-c"></span>
+  </div>
 
-  <header class="topbar">
-    <div class="topbar-inner">
-      <a class="brand" href="#top" aria-label="Halo home">
-        <img class="brand-disc" src="build/icon.png" width="36" height="36" alt="">
-        <span class="brand-text">
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#showcase" aria-label="Halo home">
+        <img src="build/icon.png" width="32" height="32" alt="">
+        <span class="brand-copy">
           <strong>Halo</strong>
-          <span>v6.2.0 · Windows 10/11</span>
+          <span>v6.2.0 for Windows</span>
         </span>
       </a>
 
-      <nav class="nav-links" aria-label="Chapters">
-        <a href="#architecture">Architecture</a>
-        <a href="#modes">Modes</a>
-        <a href="#footage">Reels</a>
-        <a href="#styles">21 Styles</a>
-        <a href="#glow-record">Glow &amp; Vinyl</a>
-        <a href="#install">Setup</a>
+      <nav class="header-nav" aria-label="Primary sections">
+        <a href="#showcase">Showcase</a>
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
       </nav>
 
-      <div class="topbar-actions">
-        <button type="button" id="motion-toggle" class="btn-ghost btn-sm" aria-label="Pause ambient animations and autoplaying previews">
-          <span class="motion-dot" aria-hidden="true"></span>
-          <span id="motion-toggle-label">Pause motion</span>
-        </button>
-        <a class="btn-ghost btn-sm hide-sm" href="https://github.com/arvgdhi/HaloVisual" target="_blank" rel="noopener">GitHub</a>
-        <a class="btn-primary btn-sm" href="#download">Download</a>
+      <div class="header-actions">
+        <a class="btn-glass hide-sm" href="https://github.com/arvgdhi/HaloVisual" target="_blank" rel="noopener">GitHub</a>
+        <a id="nav-download-btn"
+           class="btn-solid btn-sm js-installer-link"
+           href="dist/Halo-Setup-6.2.0.exe"
+           download="Halo-Setup-6.2.0.exe">Download</a>
       </div>
     </div>
   </header>
 
   <main id="main">
-    <!-- ==================== PART 1: CINEMATIC HERO + PREMIERE COUNTDOWN + DOWNLOAD ==================== -->
-    <section id="top" class="hero">
-      <div class="hero-ambient-wash" aria-hidden="true"></div>
-
-      <div class="container hero-grid" id="hero-grid">
-        <!-- Editorial Copy + Dual-State Launch Dock -->
+    <section id="showcase" class="hero">
+      <div class="container hero-layout">
         <div class="hero-copy">
-          <p class="cinema-overline">
-            <span class="live-dot" aria-hidden="true"></span>
-            HALO // WINDOWS DESKTOP AMBIENT ENGINE · V6.2.0
-          </p>
-
-          <h1 class="hero-title">
-            Your screen, <span class="title-gradient">listening.</span>
-          </h1>
-
+          <h1>Your music, painted onto the desktop.</h1>
           <p class="hero-lede">
-            Every monitor edge comes alive with <strong>64-band music-reactive light</strong>, <strong>21 synced lyric engines</strong>, and a spinning <strong>desktop turntable</strong> — reading Spotify, Apple Music, or your browser automatically.
+            Halo adds music-reactive screen-edge lighting, synced lyrics in 21 styles, and a spinning record overlay that sits quietly behind your apps on Windows 10 and 11.
           </p>
 
-          <!-- Dual-State Launch Dock (Countdown Mode <-> Official Post-Countdown Download Mode) -->
-          <div class="launch-dock" id="launch-dock" data-state="countdown">
-            <div class="dock-topbar">
-              <div class="dock-status" id="dock-status">
-                <span class="live-dot" aria-hidden="true"></span>
-                <span id="dock-status-label">Premiere Countdown · Nov 26, 2026</span>
+          <div class="hero-actions" id="download">
+            <a id="primary-download-btn"
+               class="btn-solid btn-lg js-installer-link"
+               href="dist/Halo-Setup-6.2.0.exe"
+               download="Halo-Setup-6.2.0.exe">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4v11m0 0-4-4m4 4 4-4M4 19h16" />
+              </svg>
+              <span>Download Halo for Windows</span>
+            </a>
+
+            <a class="btn-glass btn-lg"
+               href="https://github.com/arvgdhi/HaloVisual"
+               target="_blank"
+               rel="noopener">View on GitHub</a>
+          </div>
+
+          <p class="release-meta" id="dl-btn-sub">
+            v6.2.0 · Halo-Setup-6.2.0.exe · Windows 10 &amp; 11 (64-bit) · MIT Open Source
+          </p>
+        </div>
+
+        <div class="stage-column">
+          <div class="stage-shell glass-panel">
+            <div class="stage-chrome">
+              <div class="stage-tags" aria-live="polite">
+                <span class="stage-pill stage-pill-primary" id="stage-lyric-label">Fisheye</span>
+                <span class="stage-pill" id="stage-glow-label">Corner Glow</span>
+                <span class="stage-pill" id="stage-disc-label">Neon Acrylic</span>
               </div>
-              <button type="button" id="preview-launch-btn" class="preview-toggle-btn" aria-pressed="false">
-                Preview Nov 26 Launch
+              <button type="button" id="lightbox-open-btn" class="stage-inspect-btn" aria-haspopup="dialog" aria-controls="lightbox-dialog">
+                Expand
               </button>
             </div>
 
-            <!-- STATE A: Pre-Release Countdown View -->
-            <div class="dock-view" id="launch-countdown-view">
-              <div class="countdown-grid" role="timer" aria-live="off" aria-label="Countdown to Halo November 26 release">
-                <div class="cd-cell">
-                  <span class="cd-num" id="cd-days">02</span>
-                  <span class="cd-unit">Days</span>
-                </div>
-                <span class="cd-sep" aria-hidden="true">:</span>
-                <div class="cd-cell">
-                  <span class="cd-num" id="cd-hours">14</span>
-                  <span class="cd-unit">Hours</span>
-                </div>
-                <span class="cd-sep" aria-hidden="true">:</span>
-                <div class="cd-cell">
-                  <span class="cd-num" id="cd-mins">40</span>
-                  <span class="cd-unit">Minutes</span>
-                </div>
-                <span class="cd-sep" aria-hidden="true">:</span>
-                <div class="cd-cell">
-                  <span class="cd-num" id="cd-secs">00</span>
-                  <span class="cd-unit">Seconds</span>
-                </div>
-              </div>
+            <div class="stage-viewport">
+              <img id="stage-img"
+                   src="assets/screens/fisheye-corner-acrylic.jpg"
+                   width="1024"
+                   height="640"
+                   fetchpriority="high"
+                   alt="Halo desktop screenshot showing Fisheye lyrics, Corner Glow edge lighting, and Neon Acrylic record">
+            </div>
+          </div>
 
-              <div class="countdown-meta">
-                <time id="release-countdown-iso" datetime="P2DT14H40M0S" hidden></time>
-                <span id="countdown-human">Releases November 26, 2026 at midnight</span>
-                <span id="countdown-tz" class="tz-badge">Local time</span>
-              </div>
+          <div class="preset-strip" role="radiogroup" aria-label="Choose a Halo visual setup">
+            <label class="preset-card glass-card">
+              <input type="radio" name="preset" value="0" class="sr-only-radio" checked>
+              <img src="assets/screens/fisheye-corner-acrylic.jpg" width="1024" height="640" alt="">
+              <span class="preset-text">
+                <strong>Fisheye</strong>
+                <span>Corner Glow, Neon Acrylic</span>
+              </span>
+            </label>
 
-              <div class="dock-cta-row" id="download">
-                <a id="primary-download-btn"
-                   class="btn-primary btn-lg js-installer-link"
-                   href="dist/Halo-Setup-6.2.0.exe"
-                   download="Halo-Setup-6.2.0.exe">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M4 19h16"/></svg>
-                  <span>
-                    <strong id="dl-btn-title">Download Early Build · Halo-Setup-6.2.0.exe</strong>
-                    <small id="dl-btn-sub">Working Windows Installer · 80.7 MB · Win 10 &amp; 11 (x64)</small>
-                  </span>
-                </a>
-                <a class="btn-secondary btn-lg" href="#install">
-                  <span>
-                    <strong>Run from Source</strong>
-                    <small>npm install &amp;&amp; npm start</small>
-                  </span>
-                </a>
+            <label class="preset-card glass-card">
+              <input type="radio" name="preset" value="1" class="sr-only-radio">
+              <img src="assets/screens/visual-rounded-picture.jpg" width="1024" height="640" alt="">
+              <span class="preset-text">
+                <strong>Visual</strong>
+                <span>Rounded Neon, Picture disc</span>
+              </span>
+            </label>
+
+            <label class="preset-card glass-card">
+              <input type="radio" name="preset" value="2" class="sr-only-radio">
+              <img src="assets/screens/branch-liquid-cd.jpg" width="1024" height="640" alt="">
+              <span class="preset-text">
+                <strong>Branch</strong>
+                <span>Liquid, Holographic CD</span>
+              </span>
+            </label>
+
+            <label class="preset-card glass-card">
+              <input type="radio" name="preset" value="3" class="sr-only-radio">
+              <img src="assets/screens/constellation-bars-turntable.jpg" width="1024" height="640" alt="">
+              <span class="preset-text">
+                <strong>Constellation</strong>
+                <span>Bars, Turntable Deck</span>
+              </span>
+            </label>
+
+            <label class="preset-card glass-card">
+              <input type="radio" name="preset" value="4" class="sr-only-radio">
+              <img src="assets/screens/messages-aurora-sleeve.jpg" width="1024" height="640" alt="">
+              <span class="preset-text">
+                <strong>Messages</strong>
+                <span>Aurora, Album Sleeve</span>
+              </span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section-features">
+      <div class="container">
+        <div class="section-heading">
+          <h2>Built to blend into Windows</h2>
+          <p>
+            Every lyric engine, edge glow shape, and turntable style runs cleanly behind your desktop icons and automatically sleeps when you pause or play a fullscreen game.
+          </p>
+        </div>
+
+        <div class="bento-grid">
+          <div class="bento-slot bento-span-7">
+            <article class="bento-card glass-panel">
+              <img src="assets/screens/branch-liquid-cd.jpg"
+                   width="1024"
+                   height="640"
+                   loading="lazy"
+                   alt="Halo Branch curved lyric scene paired with Liquid edge glow and Holographic CD">
+              <h3>21 synced lyric styles</h3>
+              <div class="card-body">
+                <p>
+                  Switch across Lyric lines, Kinetic type, Motion scenes, and Native design cards — rendered in any font installed on your PC with per-track timing offset.
+                </p>
+                <ul class="chip-list" aria-label="Included lyric style highlights">
+                  <li>Fisheye</li>
+                  <li>Visual</li>
+                  <li>Branches</li>
+                  <li>Constellation</li>
+                  <li>Messages</li>
+                  <li>Code</li>
+                  <li>Map</li>
+                  <li>+14 more</li>
+                </ul>
+              </div>
+            </article>
+          </div>
+
+          <div class="bento-slot bento-span-5">
+            <article class="bento-card glass-panel">
+              <img src="assets/screens/visual-rounded-picture.jpg"
+                   width="1024"
+                   height="640"
+                   loading="lazy"
+                   alt="Halo Visual stacked lyric typography with Rounded Neon glow and Picture disc">
+              <h3>6 music-reactive edge glows</h3>
+              <div class="card-body">
+                <p>
+                  Classic border, Rounded neon, Liquid, Spectrum bars, Aurora, and Corner glow react in real time to Windows loopback audio and pull colors from the current cover art.
+                </p>
+              </div>
+            </article>
+          </div>
+
+          <div class="bento-slot bento-span-5">
+            <article class="bento-card glass-panel">
+              <img src="assets/screens/constellation-bars-turntable.jpg"
+                   width="1024"
+                   height="640"
+                   loading="lazy"
+                   alt="Halo Constellation stars with Spectrum Bars perimeter glow and Turntable Deck">
+              <h3>6 spinning record players</h3>
+              <div class="card-body">
+                <p>
+                  Pick Classic Vinyl, Picture disc, Neon Acrylic, Holographic CD, Turntable Deck, or Album Sleeve. Scale, rotate, or place the player on any display.
+                </p>
+              </div>
+            </article>
+          </div>
+
+          <div class="bento-slot bento-span-7">
+            <article class="bento-card glass-panel">
+              <img src="assets/screens/messages-aurora-sleeve.jpg"
+                   width="1024"
+                   height="640"
+                   loading="lazy"
+                   alt="Halo Messages thread layout paired with Aurora glow and Album Sleeve vinyl">
+              <h3>Lives behind your apps</h3>
+              <div class="card-body">
+                <p>
+                  Anchored on the Windows desktop layer so your browser and work stay on top — never steals clicks or focus. Press Ctrl+Alt+L to drag or resize across monitors, while filtering out Shorts and Reels.
+                </p>
+              </div>
+            </article>
+          </div>
+
+          <div class="bento-slot bento-span-4">
+            <article class="bento-card glass-panel">
+              <div class="card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M13 2 5 13h6l-1 9 9-12h-6z" /></svg>
+              </div>
+              <h3>Zero-GPU smart pausing</h3>
+              <div class="card-body">
+                <p>
+                  Automatically pauses behind fullscreen games and maximized windows, throttles to 30 fps Eco mode on laptop battery, and drops to 0% GPU once faded out.
+                </p>
+              </div>
+            </article>
+          </div>
+
+          <div class="bento-slot bento-span-4">
+            <article class="bento-card glass-panel">
+              <div class="card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 4v10m0 0-4-4m4 4 4-4M5 19h14" /></svg>
+              </div>
+              <h3>Automatic updates</h3>
+              <div class="card-body">
+                <p>
+                  Checks GitHub Releases on launch and in the background, downloads new builds quietly, notifies you when ready, and installs automatically when Halo closes.
+                </p>
+              </div>
+            </article>
+          </div>
+
+          <div class="bento-slot bento-span-4">
+            <article class="bento-card glass-panel">
+              <div class="card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M9 17.5V6.5l10-2v11M6.5 17.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Zm10-2a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Z" /></svg>
+              </div>
+              <h3>Works with what you play</h3>
+              <div class="card-body">
+                <p>
+                  Reads Windows media controls automatically (Spotify, Apple Music, YouTube Music, Edge, Chrome) with synced lyrics from LRCLIB — zero account login and never touches your microphone.
+                </p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="install" class="section-install">
+      <div class="container">
+        <div class="install-card glass-panel">
+          <div class="install-main">
+            <div class="install-head">
+              <img src="build/logo.png" width="48" height="48" alt="Halo icon" loading="lazy">
+              <div>
+                <h2>Ready for Windows 10 &amp; 11</h2>
+                <p id="footer-installer-meta">Per-user NSIS installer · Includes tray controls &amp; auto-updater</p>
               </div>
             </div>
 
-            <!-- STATE B: Post-Countdown Official Download View -->
-            <div class="dock-view" id="launch-released-view" hidden>
-              <div class="released-banner">
-                <span class="released-pill">RELEASE LIVE · HALO v6.2.0</span>
-                <h2 class="released-title">Halo is now available for Windows.</h2>
-                <p class="released-copy">
-                  Official November 26 build — installs in seconds for your user account with no administrator prompt.
-                </p>
-              </div>
-
-              <div class="dock-cta-row">
-                <a id="released-download-btn"
-                   class="btn-launch btn-lg js-installer-link"
-                   href="dist/Halo-Setup-6.2.0.exe"
-                   download="Halo-Setup-6.2.0.exe">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M4 19h16"/></svg>
-                  <span>
-                    <strong>Download Halo for Windows</strong>
-                    <small>Halo-Setup-6.2.0.exe · 80.7 MB · Windows 10 &amp; 11 (x64)</small>
-                  </span>
-                </a>
-                <a class="btn-secondary btn-lg js-releases-link"
-                   href="https://github.com/arvgdhi/HaloVisual/releases"
-                   target="_blank" rel="noopener">
-                  <span>
-                    <strong>Release Notes</strong>
-                    <small>v6.2.0 Changelog &amp; Source</small>
-                  </span>
-                </a>
-              </div>
+            <div class="install-actions">
+              <a id="footer-download-btn"
+                 class="btn-solid btn-lg js-installer-link"
+                 href="dist/Halo-Setup-6.2.0.exe"
+                 download="Halo-Setup-6.2.0.exe">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 4v11m0 0-4-4m4 4 4-4M4 19h16" />
+                </svg>
+                <span>Download v6.2.0 (.exe)</span>
+              </a>
+              <a class="btn-glass btn-lg js-releases-link"
+                 href="https://github.com/arvgdhi/HaloVisual/releases"
+                 target="_blank"
+                 rel="noopener">GitHub Releases</a>
             </div>
 
-            <!-- Installer Spec Strip & SmartScreen Guide -->
-            <dl class="dl-specs">
-              <div>
-                <dt>Installer</dt>
-                <dd><code>Halo-Setup-6.2.0.exe</code></dd>
-              </div>
-              <div>
-                <dt>Install Mode</dt>
-                <dd>Per-user NSIS · No UAC prompt</dd>
-              </div>
-              <div>
-                <dt>Media Sources</dt>
-                <dd>Spotify, Apple Music, Chrome, Edge</dd>
-              </div>
-              <div>
-                <dt>Audio Privacy</dt>
-                <dd>Loopback only · Zero mic</dd>
-              </div>
-            </dl>
-
-            <details class="dl-details">
-              <summary><span>Windows SmartScreen note &amp; run from source (<code>npm start</code>)</span></summary>
-              <div class="dl-details-body">
+            <details class="source-details">
+              <summary>Windows SmartScreen note &amp; run from source (<code>npm start</code>)</summary>
+              <div class="details-body">
                 <p>
-                  <strong>SmartScreen note:</strong> Community builds are not code-signed yet. If Windows SmartScreen says <em>unknown publisher</em>, choose <strong>More info &rarr; Run anyway</strong>. Cleanly uninstalls anytime from <em>Windows Settings &rarr; Apps</em>.
+                  Because Halo is an independent open-source build without an Authenticode certificate, Windows may show <strong>Windows protected your PC</strong> on first launch. Click <strong>More info</strong> -> <strong>Run anyway</strong>, or run directly from source:
                 </p>
-                <p>
-                  <strong>Developer quick-start:</strong> Run <code>npm install</code> then <code>npm start</code> (if Electron needs a binary fix, run <code>npm run fix-electron</code>).
-                </p>
+                <div class="cmd-row">
+                  <code>git clone https://github.com/arvgdhi/HaloVisual.git &amp;&amp; cd HaloVisual &amp;&amp; npm install &amp;&amp; npm start</code>
+                  <button type="button" class="copy-btn" data-copy="git clone https://github.com/arvgdhi/HaloVisual.git && cd HaloVisual && npm install && npm start">Copy</button>
+                </div>
               </div>
             </details>
           </div>
-        </div>
 
-        <!-- Widescreen Darkroom Cinema Stage -->
-        <div class="hero-stage">
-          <div class="cinema-frame">
-            <div class="cinema-backlight" aria-hidden="true"></div>
-
-            <div class="monitor-bezel">
-              <div class="bezel-bar">
-                <div class="bezel-left">
-                  <div class="bezel-dots" aria-hidden="true"><i></i><i></i><i></i></div>
-                  <span class="bezel-title" id="hero-video-title">01 / Classic Lyric Lines + Shifting Rainbow Edge Glow (42s)</span>
-                </div>
-                <div class="bezel-right">
-                  <span class="bezel-badge">REAL HARDWARE</span>
-                  <button type="button" id="theater-toggle-btn" class="theater-btn" aria-pressed="false">
-                    Theater View
-                  </button>
-                </div>
+          <div class="install-shortcuts glass-subpanel">
+            <h3>Global shortcuts</h3>
+            <dl class="shortcut-list">
+              <div>
+                <dt>Edit layout on screen</dt>
+                <dd><kbd>Ctrl + Alt + L</kbd></dd>
               </div>
-
-              <!-- Above-the-fold hero video: eager load with poster -->
-              <div class="video-frame">
-                <video
-                  id="hero-video"
-                  controls
-                  autoplay
-                  muted
-                  loop
-                  playsinline
-                  preload="metadata"
-                  width="848"
-                  height="478"
-                  poster="assets/posters/lines-rainbow.jpg"
-                  aria-label="Real screen capture of Halo desktop overlay running on Windows"
-                >
-                  <source id="hero-video-src" src="assets/videos/lines-rainbow.mp4" type="video/mp4">
-                </video>
+              <div>
+                <dt>Quit Halo from anywhere</dt>
+                <dd><kbd>Ctrl + Alt + Q</kbd></dd>
               </div>
-
-              <!-- Director's Slate 4-Clip Switcher -->
-              <div class="hero-switcher" role="group" aria-label="Switch hero screening reel">
-                <button type="button" class="hero-clip-btn is-active" data-clip="rainbow"
-                  data-src="assets/videos/lines-rainbow.mp4"
-                  data-poster="assets/posters/lines-rainbow.jpg"
-                  data-title="01 / Classic Lyric Lines + Shifting Rainbow Edge Glow (42s)"
-                  data-c1="#7c5cff" data-c2="#22d3ee">
-                  <small>REEL 01</small>
-                  <strong>Rainbow + Classic</strong>
-                </button>
-                <button type="button" class="hero-clip-btn" data-clip="fisheye"
-                  data-src="assets/videos/kinetic-fisheye.mp4"
-                  data-poster="assets/posters/kinetic-fisheye.jpg"
-                  data-title="02 / Fisheye WebGL Lens + Dual-Monitor Album Glow (43s)"
-                  data-c1="#ff5a36" data-c2="#5be37d">
-                  <small>REEL 02</small>
-                  <strong>Fisheye Lens</strong>
-                </button>
-                <button type="button" class="hero-clip-btn" data-clip="constellation"
-                  data-src="assets/videos/motion-constellation.mp4"
-                  data-poster="assets/posters/motion-constellation.jpg"
-                  data-title="03 / Constellation Motion Scene + Electric Lime Glow (25s)"
-                  data-c1="#5be37d" data-c2="#ffe14f">
-                  <small>REEL 03</small>
-                  <strong>Constellation</strong>
-                </button>
-                <button type="button" class="hero-clip-btn" data-clip="messages"
-                  data-src="assets/videos/native-messages.mp4"
-                  data-poster="assets/posters/native-messages.jpg"
-                  data-title="04 / Native Design Messages Thread + Warm Album Glow (19s)"
-                  data-c1="#ff9a3c" data-c2="#0b84fe">
-                  <small>REEL 04</small>
-                  <strong>Messages UI</strong>
-                </button>
+              <div>
+                <dt>Exit edit mode</dt>
+                <dd><kbd>Esc</kbd></dd>
               </div>
-            </div>
-          </div>
-
-          <a class="scroll-cue" href="#architecture">
-            <span>Scroll to explore architecture, operating modes, hardware reels &amp; all 21 styles</span>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m0 0-5-5m5 5 5-5"/></svg>
-          </a>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==================== CHAPTER 01: ARCHITECTURE ==================== -->
-    <section id="architecture" class="section reveal-block">
-      <div class="container">
-        <header class="section-head">
-          <span class="chapter-kicker">CHAPTER 01 // THE ARCHITECTURE</span>
-          <h2>Three living desktop layers, synchronized to every beat</h2>
-          <p>
-            Halo sits unobtrusively in your Windows system tray, hooks directly into Windows Media Controls (SMTC), and brings three unified visual layers to every display you connect.
-          </p>
-        </header>
-
-        <div class="pillars-grid">
-          <article class="feature-card">
-            <div class="sq-icon" style="background: linear-gradient(145deg, #ff9f0a, #ff375f);" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="3.5"/><rect x="7" y="8.5" width="10" height="7" rx="1.5" opacity=".55"/></svg>
-            </div>
-            <h3>Music-Reactive Edge Glow</h3>
-            <p>
-              Real-time 64-band FFT audio analysis wraps all 4 edges of any selected screen in ambient light — across <strong>6 light sculptures</strong> from crisp borders to Aurora curtains and spectrum bars.
-            </p>
-            <ul class="mini-tags">
-              <li>Album-matched hue</li>
-              <li>Per-monitor picker</li>
-              <li>Quiet idle glow</li>
-            </ul>
-          </article>
-
-          <article class="feature-card">
-            <div class="sq-icon" style="background: linear-gradient(145deg, #bf5af2, #5e5ce6);" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h11M4 17h14"/></svg>
-            </div>
-            <h3>Synced Lyrics in 21 Styles</h3>
-            <p>
-              Pulls line-synced lyrics automatically from <strong>LRCLIB</strong> with word-length interpolation, powering 4 distinct visual families from kinetic WebGL lenses to interactive lock-screen cards.
-            </p>
-            <ul class="mini-tags">
-              <li>4 visual families</li>
-              <li>±8000 ms timing nudge</li>
-              <li>Every PC font</li>
-            </ul>
-          </article>
-
-          <article class="feature-card">
-            <div class="sq-icon" style="background: linear-gradient(145deg, #0a84ff, #30d158);" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.8"/></svg>
-            </div>
-            <h3>Spinning Record Player</h3>
-            <p>
-              Extracts cover art from Windows with an iTunes fallback and presses it onto <strong>6 turntable &amp; disc players</strong> — complete with smooth tonearm drops on play and realistic spin-down on pause.
-            </p>
-            <ul class="mini-tags">
-              <li>Classic Vinyl to CD</li>
-              <li>60–1000 px diameter</li>
-              <li>-180° to +180° tilt</li>
-            </ul>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==================== CHAPTER 02: OPERATING MODES ==================== -->
-    <section id="modes" class="section section-alt reveal-block">
-      <div class="container">
-        <header class="section-head">
-          <span class="chapter-kicker">CHAPTER 02 // OPERATING MODES</span>
-          <h2>Behind your apps, floating above them, or freely positioned across screens</h2>
-          <p>
-            Switch Halo's window layering and spatial editing behavior live from the settings sidebar or system tray without interrupting your music.
-          </p>
-        </header>
-
-        <div class="modes-grid">
-          <article class="mode-item">
-            <span class="mode-badge badge-green">Desktop Layer Mode</span>
-            <h3>Behind Apps (Live Wallpaper Mode)</h3>
-            <p>A lightweight Win32 Z-order helper (<code>zorder.ps1</code>) pins Halo's glow, lyrics, and vinyl directly behind every open window so your wallpaper becomes a living stage.</p>
-          </article>
-
-          <article class="mode-item">
-            <span class="mode-badge badge-blue">Top Layer Mode</span>
-            <h3>Above Apps (Click-Through Overlay)</h3>
-            <p>Elevates Halo cleanly over full-screen windows and apps while keeping pointer events 100% click-through — zero stray clicks while working or gaming.</p>
-          </article>
-
-          <article class="mode-item">
-            <span class="mode-badge badge-purple">Ctrl + Alt + L</span>
-            <h3>On-Screen Layout Edit Mode</h3>
-            <p>Drag lyrics and the record onto any display, resize the stage via 8 corner/edge handles, scroll wheel to scale size, and <code>Alt + Scroll</code> to rotate — while other apps stay clickable.</p>
-          </article>
-
-          <article class="mode-item">
-            <span class="mode-badge badge-orange">Smart Audio Filter</span>
-            <h3>Only React to Music &amp; Auto-Fade</h3>
-            <p>Automatically ignores browser Shorts, Reels, and spoken clips unless they look like music tracks, and gently fades every overlay out after pause (default 10 s, up to never).</p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==================== CHAPTER 03: HARDWARE REELS ==================== -->
-    <section id="footage" class="section reveal-block">
-      <div class="container">
-        <header class="section-head">
-          <span class="chapter-kicker">CHAPTER 03 // CAPTURED IN THE DARKROOM</span>
-          <h2>Four unedited screening reels on multi-monitor hardware</h2>
-          <p>
-            Recorded directly from real Windows sessions showing dual-monitor edge glow bleed, per-display filtering, and spinning cover art — toggle any reel between live video and keyframe screenshot.
-          </p>
-        </header>
-
-        <div class="footage-grid" id="footage-grid">
-          <article class="footage-card" data-mode="video">
-            <div class="footage-media">
-              <video
-                class="footage-video"
-                controls
-                loading="lazy"
-                muted
-                loop
-                playsinline
-                preload="metadata"
-                width="848"
-                height="478"
-                poster="assets/posters/native-messages.jpg"
-                aria-label="Halo Native Design Messages style with Classic Vinyl and warm album glow"
-              >
-                <source src="assets/videos/native-messages.mp4" type="video/mp4">
-              </video>
-              <img
-                class="footage-still"
-                src="assets/posters/native-messages.jpg"
-                width="848"
-                height="478"
-                loading="lazy"
-                alt="Still frame showing Halo Messages bubble thread, spinning vinyl record, and amber edge glow across two screens"
-              >
-            </div>
-            <div class="footage-meta">
-              <div class="footage-top">
-                <span class="tag tag-native">REEL 01 · Native Design · Messages</span>
-                <button type="button" class="toggle-media-btn" aria-pressed="false">Screenshot</button>
+              <div>
+                <dt>Resize lyric font or disc (in Edit mode)</dt>
+                <dd><kbd>Scroll wheel</kbd></dd>
               </div>
-              <h3>Lyrics as an Incoming Conversation</h3>
-              <p>Lines arrive as sequential iOS chat bubbles with typing indicators alongside Classic Vinyl and warm album-matched dual-monitor light.</p>
-            </div>
-          </article>
-
-          <article class="footage-card" data-mode="video">
-            <div class="footage-media">
-              <video
-                class="footage-video"
-                controls
-                loading="lazy"
-                muted
-                loop
-                playsinline
-                preload="metadata"
-                width="848"
-                height="478"
-                poster="assets/posters/kinetic-fisheye.jpg"
-                aria-label="Halo Fisheye WebGL shader style with spinning vinyl and sunset edge glow"
-              >
-                <source src="assets/videos/kinetic-fisheye.mp4" type="video/mp4">
-              </video>
-              <img
-                class="footage-still"
-                src="assets/posters/kinetic-fisheye.jpg"
-                width="848"
-                height="478"
-                loading="lazy"
-                alt="Still frame showing Halo WebGL Fisheye spherical lyric distortion with sunset red and green glow across two monitors"
-              >
-            </div>
-            <div class="footage-meta">
-              <div class="footage-top">
-                <span class="tag tag-kinetic">REEL 02 · Kinetic Type · Fisheye WebGL</span>
-                <button type="button" class="toggle-media-btn" aria-pressed="false">Screenshot</button>
+              <div>
+                <dt>Rotate overlay element (in Edit mode)</dt>
+                <dd><kbd>Alt + Scroll</kbd></dd>
               </div>
-              <h3>Spherical Barrel-Distortion Shader</h3>
-              <p>Offscreen 2D lyrics projected onto a bulging optical WebGL lens with chromatic aberration and sunset crimson-emerald monitor glow.</p>
-            </div>
-          </article>
-
-          <article class="footage-card" data-mode="video">
-            <div class="footage-media">
-              <video
-                class="footage-video"
-                controls
-                loading="lazy"
-                muted
-                loop
-                playsinline
-                preload="metadata"
-                width="848"
-                height="478"
-                poster="assets/posters/motion-constellation.jpg"
-                aria-label="Halo Constellation motion scene with electric lime edge glow across dual monitors"
-              >
-                <source src="assets/videos/motion-constellation.mp4" type="video/mp4">
-              </video>
-              <img
-                class="footage-still"
-                src="assets/posters/motion-constellation.jpg"
-                width="848"
-                height="478"
-                loading="lazy"
-                alt="Still frame showing Halo Constellation star-tracing lines and lime screen-edge glow across two displays"
-              >
-            </div>
-            <div class="footage-meta">
-              <div class="footage-top">
-                <span class="tag tag-motion">REEL 03 · Motion Scene · Constellation</span>
-                <button type="button" class="toggle-media-btn" aria-pressed="false">Screenshot</button>
-              </div>
-              <h3>Star-by-Star Constellation Tracing</h3>
-              <p>Every sung word ignites a celestial node and connects luminous vector lines while synced green glow wraps both screens.</p>
-            </div>
-          </article>
-
-          <article class="footage-card" data-mode="video">
-            <div class="footage-media">
-              <video
-                class="footage-video"
-                controls
-                loading="lazy"
-                muted
-                loop
-                playsinline
-                preload="metadata"
-                width="848"
-                height="478"
-                poster="assets/posters/lines-rainbow.jpg"
-                aria-label="Halo Classic lyric lines with shifting Rainbow edge glow on primary display only"
-              >
-                <source src="assets/videos/lines-rainbow.mp4" type="video/mp4">
-              </video>
-              <img
-                class="footage-still"
-                src="assets/posters/lines-rainbow.jpg"
-                width="848"
-                height="478"
-                loading="lazy"
-                alt="Still frame showing Rainbow edge glow on primary display with secondary monitor untouched and Classic lyric fill"
-              >
-            </div>
-            <div class="footage-meta">
-              <div class="footage-top">
-                <span class="tag tag-lines">REEL 04 · Lyric Lines · Rainbow + Per-Screen</span>
-                <button type="button" class="toggle-media-btn" aria-pressed="false">Screenshot</button>
-              </div>
-              <h3>Rainbow Cycling &amp; Display Isolation</h3>
-              <p>Continuous HSV color sweep illuminating the primary display while deliberately leaving the adjacent monitor untouched via Halo's screen selector.</p>
-            </div>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==================== CHAPTER 04: LIVE SIMULATOR & 21 STYLES ==================== -->
-    <section id="styles" class="section section-alt reveal-block">
-      <div class="container">
-        <header class="section-head">
-          <span class="chapter-kicker">CHAPTER 04 // INTERACTIVE STAGE &amp; 21 LYRIC STYLES</span>
-          <h2>Direct all 21 lyric styles live on the virtual stage</h2>
-          <p>
-            Powered directly by Halo's real scene engine (<code>scenes.js</code>) and canvas glow algorithms. Pick any style, switch glow shapes, or test Dark vs. Light Native Design modes.
-          </p>
-        </header>
-
-        <!-- Live Virtual Desktop Simulator with ambient halo backlight -->
-        <div class="sim-shell" id="simulator">
-          <div class="sim-stage" id="sim-stage">
-            <div class="sim-wallpaper" aria-hidden="true"></div>
-            <canvas id="demo-glow" aria-hidden="true"></canvas>
-
-            <div id="demo-player" data-disc="vinyl" class="playing">
-              <div id="demo-plinth"><div id="demo-strobe"></div></div>
-              <div id="demo-record">
-                <div id="demo-artfull"></div>
-                <div id="demo-grooves"></div>
-                <div id="demo-label"></div>
-                <div id="demo-cdhub"></div>
-                <div id="demo-hole"></div>
-                <div id="demo-sheen"></div>
-              </div>
-              <div id="demo-sleeve"><div id="demo-sleeve-art"></div></div>
-              <svg id="demo-arm" viewBox="0 0 100 100" aria-hidden="true">
-                <g id="demo-armg">
-                  <line x1="112" y1="-6" x2="76" y2="24" stroke="#cfd2da" stroke-width="1.7" stroke-linecap="round"/>
-                  <line x1="76" y1="24" x2="71.5" y2="27.8" stroke="#f1f1f6" stroke-width="3" stroke-linecap="round"/>
-                  <circle cx="112" cy="-6" r="5.5" fill="#2b2d33" stroke="#8d909a" stroke-width="1"/>
-                  <circle cx="118" cy="-11" r="3.2" fill="#3a3c44" stroke="#8d909a" stroke-width=".8"/>
-                </g>
-              </svg>
-            </div>
-
-            <div id="demo-lyrics">
-              <div id="demo-stage"><div id="demo-track"></div><div id="demo-scene"></div></div>
-            </div>
-
-            <div class="sim-hud">
-              <div class="sim-now-playing">
-                <span class="live-dot" aria-hidden="true"></span>
-                <span id="sim-active-summary">Style: Classic · Glow: Classic border · Record: Classic Vinyl</span>
-              </div>
-              <button type="button" class="sim-play-btn" id="sim-play-btn">Pause Beat</button>
-            </div>
-          </div>
-
-          <div class="sim-controls">
-            <div class="sim-control-group">
-              <span class="sim-ctrl-label">Demo Track</span>
-              <div class="sim-chips" id="sim-track-chips"></div>
-            </div>
-            <div class="sim-control-group">
-              <span class="sim-ctrl-label">Native Theme (Messages, Payments, Map)</span>
-              <div class="seg-mini" role="group" aria-label="Native theme toggle">
-                <button type="button" class="theme-btn" data-theme="dark" aria-pressed="true">Dark</button>
-                <button type="button" class="theme-btn" data-theme="light" aria-pressed="false">Light</button>
-              </div>
-            </div>
-            <div class="sim-control-group">
-              <span class="sim-ctrl-label">Palette</span>
-              <div class="sim-chips" id="sim-palette-chips"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Category Tablist -->
-        <div class="tabs-bar">
-          <div class="tablist" focusgroup="tablist nomemory" role="tablist" aria-label="Filter lyric style groups">
-            <button type="button" role="tab" id="tab-all" aria-selected="true" focusgroupstart data-group="all">
-              All 21 Styles
-            </button>
-            <button type="button" role="tab" id="tab-lines" aria-selected="false" data-group="Lyric lines">
-              Lyric lines <small>(8)</small>
-            </button>
-            <button type="button" role="tab" id="tab-kinetic" aria-selected="false" data-group="Kinetic type">
-              Kinetic type <small>(4)</small>
-            </button>
-            <button type="button" role="tab" id="tab-motion" aria-selected="false" data-group="Motion scenes">
-              Motion scenes <small>(5)</small>
-            </button>
-            <button type="button" role="tab" id="tab-native" aria-selected="false" data-group="Native design">
-              Native design <small>(4)</small>
-            </button>
-          </div>
-          <p class="tabs-hint" id="styles-group-note">Click any card to cue it live on the stage above.</p>
-        </div>
-
-        <div role="tabpanel" id="styles-panel" aria-labelledby="tab-all" tabindex="0">
-          <div id="styles-catalogue" class="styles-catalogue"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==================== CHAPTER 05: GLOW, RECORD, CUSTOMIZATION & FINAL DOWNLOAD ==================== -->
-    <section id="glow-record" class="section reveal-block">
-      <div class="container">
-        <header class="section-head">
-          <span class="chapter-kicker">CHAPTER 05 // LIGHT SCULPTURES &amp; TURNTABLES</span>
-          <h2>6 edge-glow algorithms &amp; 6 spinning record decks</h2>
-          <p>Click any glow sculpture or turntable deck below to pair it live with the simulator above.</p>
-        </header>
-
-        <div class="two-col-showcase">
-          <div class="showcase-block">
-            <h3 class="sub-showcase-title">6 Audio-Reactive Glow Shapes</h3>
-            <p class="sub-showcase-desc">Tune thickness (1–60 px), spread (0.1×–5×), quiet idle glow, album hue extraction, rainbow cycling, or two custom colors — per monitor.</p>
-            <div class="glow-grid" id="glow-shapes-grid"></div>
-          </div>
-
-          <div class="showcase-block">
-            <h3 class="sub-showcase-title">6 Spinning Record Styles</h3>
-            <p class="sub-showcase-desc">Pulls cover art from Windows or iTunes, smoothly drops the tonearm when tracks begin, and spins smoothly to rest on pause.</p>
-            <div class="disc-grid" id="disc-styles-grid"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="install" class="section section-alt reveal-block">
-      <div class="container">
-        <header class="section-head">
-          <span class="chapter-kicker">DEEP CUSTOMIZATION &amp; LAUNCH SETUP</span>
-          <h2>Crafted down to every pixel, font, and shortcut</h2>
-          <p>Every style automatically adapts to a tuned box size until you drag the 8 resize handles yourself.</p>
-        </header>
-
-        <div class="specs-bento">
-          <div class="spec-box">
-            <h3>Typography &amp; Context Lines</h3>
-            <ul class="check-list">
-              <li><strong>Any installed Windows font:</strong> Scrollable font picker previews every typeface installed on your PC in its own font, with Bold toggle and 12–240 px sizing.</li>
-              <li><strong>Spotify-style surrounding lines:</strong> Show <code>0–8</code> lines before and <code>0–8</code> lines after the active lyric, with optional distance blur.</li>
-              <li><strong>Color &amp; alignment:</strong> Left, centre, or right alignment, 8 presets + <em>Match album art</em> + custom hex color picker.</li>
-              <li><strong>Timing offset:</strong> Nudge early or late lyrics from <code>-8000 ms</code> to <code>+8000 ms</code> in 50 ms steps.</li>
-            </ul>
-          </div>
-
-          <div class="spec-box">
-            <h3>Global Shortcuts &amp; Spatial Controls</h3>
-            <div class="shortcut-list">
-              <div class="sc-row">
-                <span>Toggle on-screen layout editing anywhere</span>
-                <kbd>Ctrl + Alt + L</kbd>
-              </div>
-              <div class="sc-row">
-                <span>Quit Halo completely from any app</span>
-                <kbd>Ctrl + Alt + Q</kbd>
-              </div>
-              <div class="sc-row">
-                <span>Leave edit mode</span>
-                <kbd>Esc</kbd>
-              </div>
-              <div class="sc-row">
-                <span>Resize lyric font or record diameter (in Edit mode)</span>
-                <kbd>Scroll wheel</kbd>
-              </div>
-              <div class="sc-row">
-                <span>Rotate lyric box or record player (-180° to +180°)</span>
-                <kbd>Alt + Scroll</kbd>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="dev-banner">
-          <div class="dev-copy">
-            <span class="chapter-kicker">BUILD FROM SOURCE &amp; AUTO-UPDATES</span>
-            <h3>Electron 33 + GitHub Installer Pipeline</h3>
-            <p>
-              Installed copies check GitHub Releases in the background when enabled, or you can run directly from source and build <code>Halo-Setup-6.2.0.exe</code> yourself in two commands:
-            </p>
-            <div class="cmd-grid">
-              <div class="cmd-item">
-                <code>git clone https://github.com/arvgdhi/HaloVisual.git &amp;&amp; cd HaloVisual &amp;&amp; npm install &amp;&amp; npm start</code>
-                <button type="button" class="copy-btn" data-copy="git clone https://github.com/arvgdhi/HaloVisual.git && cd HaloVisual && npm install && npm start">Copy</button>
-              </div>
-              <div class="cmd-item">
-                <code>npm run dist</code>
-                <button type="button" class="copy-btn" data-copy="npm run dist">Copy</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="dev-cta-box">
-            <img src="build/logo.png" width="56" height="56" alt="Halo icon" loading="lazy">
-            <strong id="footer-cta-title">Premiere: November 26</strong>
-            <span id="footer-countdown-mini">Releasing Nov 26, 2026</span>
-            <a id="footer-download-btn"
-               class="btn-primary js-installer-link"
-               href="dist/Halo-Setup-6.2.0.exe"
-               download="Halo-Setup-6.2.0.exe">
-              Download v6.2.0 (.exe)
-            </a>
+            </dl>
           </div>
         </div>
       </div>
     </section>
   </main>
 
-  <footer class="footer">
+  <footer class="site-footer">
     <div class="container footer-inner">
       <div class="footer-brand">
-        <img src="build/logo.png" width="24" height="24" alt="" loading="lazy">
-        <span><strong>Halo v6.2.0</strong> · MIT License · Credits: Lyrics from LRCLIB · UI Font: Google Sans (SIL OFL)</span>
+        <img src="build/logo.png" width="22" height="22" alt="" loading="lazy">
+        <span>Halo v6.2.0 · MIT License · Synced lyrics by LRCLIB · UI font Google Sans</span>
       </div>
       <div class="footer-links">
-        <a href="#top">Back to top</a>
-        <a href="https://github.com/arvgdhi/HaloVisual" target="_blank" rel="noopener">GitHub Repo</a>
-        <a href="#install">Install &amp; Source</a>
+        <a href="#showcase">Showcase</a>
+        <a href="#features">Features</a>
+        <a href="https://github.com/arvgdhi/HaloVisual" target="_blank" rel="noopener">GitHub</a>
       </div>
     </div>
   </footer>
 
-  <!-- Fallback Native Modal when remote static hosting doesn't include dist/*.exe or a published GitHub Release yet -->
-  <dialog id="release-dialog" class="cinema-dialog" aria-labelledby="release-dialog-title">
-    <div class="dialog-inner">
-      <div class="dialog-head">
-        <div>
-          <span class="chapter-kicker">INSTALLER AVAILABILITY</span>
+  <!-- Full-resolution screenshot modal -->
+  <dialog id="lightbox-dialog" class="glass-dialog lightbox-dialog" closedby="any" aria-labelledby="lightbox-title">
+    <div class="dialog-surface">
+      <div class="dialog-bar">
+        <div class="dialog-heading">
+          <h3 id="lightbox-title">Fisheye</h3>
+          <p id="lightbox-subtitle">Corner Glow, Neon Acrylic</p>
+        </div>
+        <div class="dialog-controls">
+          <button type="button" id="lightbox-prev-btn" class="btn-glass btn-sm" aria-label="Previous preset">Prev</button>
+          <button type="button" id="lightbox-next-btn" class="btn-glass btn-sm" aria-label="Next preset">Next</button>
+          <button type="button" id="lightbox-close-btn" class="dialog-close" aria-label="Close preview">✕</button>
+        </div>
+      </div>
+      <div class="lightbox-frame">
+        <img id="lightbox-img"
+             src="assets/screens/fisheye-corner-acrylic.jpg"
+             width="1024"
+             height="640"
+             fetchpriority="low"
+             decoding="async"
+             alt="Halo preset full-resolution screenshot">
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Fallback release dialog when remote release isn't publicly reachable yet -->
+  <dialog id="release-dialog" class="glass-dialog release-dialog" closedby="any" aria-labelledby="release-dialog-title">
+    <div class="dialog-surface">
+      <div class="dialog-bar">
+        <div class="dialog-heading">
           <h3 id="release-dialog-title">Get Halo-Setup-6.2.0.exe</h3>
+          <p>Installer asset unavailable from remote release</p>
         </div>
-        <button type="button" id="dialog-close-btn" class="dialog-close" aria-label="Close modal">✕</button>
+        <button type="button" id="release-close-btn" class="dialog-close" aria-label="Close dialog">✕</button>
       </div>
-      <p class="dialog-body">
-        The remote GitHub Release asset isn't published publicly yet (and static web hosts don't bundle the 80.7 MB <code>dist/Halo-Setup-6.2.0.exe</code> installer unless added to the release). You can build or launch Halo directly from source right now:
+      <p class="dialog-copy">
+        The remote GitHub Release asset isn't publicly reachable yet. Open GitHub Releases or run Halo directly from source:
       </p>
-      <div class="cmd-grid">
-        <div class="cmd-item">
-          <code>npm install &amp;&amp; npm run dist</code>
-          <button type="button" class="copy-btn" data-copy="npm install && npm run dist">Copy</button>
-        </div>
-        <div class="cmd-item">
-          <code>git tag v6.2.0 &amp;&amp; git push origin main --tags</code>
-          <button type="button" class="copy-btn" data-copy="git tag v6.2.0 && git push origin main --tags">Copy</button>
-        </div>
+      <div class="cmd-row">
+        <code>npm install &amp;&amp; npm run dist</code>
+        <button type="button" class="copy-btn" data-copy="npm install && npm run dist">Copy</button>
       </div>
-      <div class="dialog-actions">
-        <a class="btn-secondary btn-sm" href="https://github.com/arvgdhi/HaloVisual/releases" target="_blank" rel="noopener">Open GitHub Releases</a>
-        <button type="button" id="dialog-done-btn" class="btn-primary btn-sm">Done</button>
+      <div class="dialog-footer-actions">
+        <a class="btn-glass btn-sm js-releases-link" href="https://github.com/arvgdhi/HaloVisual/releases" target="_blank" rel="noopener">Open GitHub Releases</a>
+        <button type="button" id="release-done-btn" class="btn-solid btn-sm">Close</button>
       </div>
     </div>
   </dialog>
 
   <div class="toast" id="copy-toast" role="status" aria-live="polite" hidden>Copied to clipboard</div>
 
-  <script src="scenes.js"></script>
   <script src="site.js"></script>
 </body>
 </html>

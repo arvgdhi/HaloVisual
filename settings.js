@@ -562,7 +562,7 @@ function buildGeneral(sec) {
       upHint.textContent = `Downloading ${u.releaseName || ('v' + u.version)} (${u.progress || 0}%)`;
       upBtn.textContent = 'Downloading\u2026';
     } else if (u.status === 'ready') {
-      upHint.textContent = `${u.releaseName || ('v' + u.version)} downloaded and ready to install`;
+      upHint.textContent = `${u.releaseName || ('v' + u.version)} ready \u2014 installs automatically on quit, or restart now`;
       upBtn.textContent = 'Install & restart';
     } else if (u.status === 'up-to-date') {
       upHint.textContent = `Halo v${st.version} is up to date`;
@@ -587,7 +587,7 @@ function buildGeneral(sec) {
       row('Start Halo with Windows', st.packaged ? null : 'Available in the installed version (npm run dist)', toggle('startWithWindows', !st.packaged), false, ico('power', '#30d158')),
       row('Start minimized to tray', 'Launch directly in the background without opening this window', toggle('startMinimized'), false, ico('screen', '#0a84ff'))),
     mod('Updates', 'Checks github.com/arvgdhi/HaloVisual for newer installer releases.',
-      row('Auto-update from GitHub', 'Automatically download new releases in the background', toggle('autoUpdate'), false, ico('sparkle', '#5e5ce6')),
+      row('Auto-update from GitHub', 'Download new releases in the background and install automatically on quit', toggle('autoUpdate'), false, ico('sparkle', '#5e5ce6')),
       upRow),
     mod('Shortcuts', 'These work from anywhere in Windows.',
       row('Edit layout on screen', null, h('kbd', null, 'Ctrl + Alt + L'), false, ico('keyboard', '#636366')),

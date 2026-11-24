@@ -1,5 +1,5 @@
 const {
-  app, BrowserWindow, Tray, Menu, nativeImage, screen, session, desktopCapturer, ipcMain, globalShortcut, powerMonitor,
+  app, BrowserWindow, Tray, Menu, Notification, nativeImage, screen, session, desktopCapturer, ipcMain, globalShortcut, powerMonitor,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -684,9 +684,11 @@ async function checkForUpdates(manual = false) {
     const best = candidates[0];
     let localMtime = 0;
     try { localMtime = fs.statSync(process.execPath).mtimeMs; } catch { /* ignore */ }
+    const assetUpdatedMs = Date.parse(best && best.asset ? (best.asset.updated_at || 0) : 0);
+    const latestGraceMs = settings.installedAssetId ? 60000 : 5 * 60 * 1000;
     const isNewer = best && (
       cmpVer(best.ver, app.getVersion()) > 0 ||
-      (best.rel.tag_name === 'latest' && app.isPackaged && best.asset.id !== settings.installedAssetId && Date.parse(best.asset.updated_at || 0) > localMtime + 60000)
+      (best.rel.tag_name === 'latest' && app.isPackaged && best.asset.id !== settings.installedAssetId && assetUpdatedMs > localMtime + latestGraceMs)
     );
 
     if (!isNewer) {
@@ -770,6 +772,7 @@ async function downloadUpdate() {
     console.log('[update] downloaded to', dest);
     sendState();
     scheduleTray();
+    notifyUpdateReady();
   } catch (e) {
     try { if (fs.existsSync(part)) fs.unlinkSync(part); } catch { /* ignore */ }
     console.log('[update] download failed:', e.message);
@@ -778,19 +781,54 @@ async function downloadUpdate() {
   }
 }
 
-function installUpdate() {
-  if (updateState.status !== 'ready' || !updateState.installerPath || !fs.existsSync(updateState.installerPath)) return;
+let notifiedAssetId = null;
+function notifyUpdateReady() {
+  if (updateState.status !== 'ready' || updateState.assetId === notifiedAssetId) return;
+  if (!Notification.isSupported()) return;
+  notifiedAssetId = updateState.assetId;
+  const label = updateState.releaseName || ('v' + updateState.version);
+  const n = new Notification({
+    title: 'Halo update ready',
+    body: `${label} will install automatically when Halo closes. Click to install and restart now.`,
+    icon: path.join(__dirname, 'build', 'icon.png'),
+  });
+  n.on('click', () => installUpdate());
+  n.show();
+}
+
+let installingUpdate = false;
+function launchPendingInstaller(relaunch) {
+  if (installingUpdate || updateState.status !== 'ready' || !updateState.installerPath || !fs.existsSync(updateState.installerPath)) {
+    return false;
+  }
+  installingUpdate = true;
   settings.installedAssetId = updateState.assetId;
   try { fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2)); } catch { /* ignore */ }
-  const psCmd = 'Start-Sleep -Seconds 2; Start-Process -FilePath $env:HALO_SETUP -ArgumentList "/S" -Wait; Start-Process -FilePath $env:HALO_EXE';
+  const psCmd = [
+    'Wait-Process -Id ([int]$env:HALO_PID) -Timeout 20 -ErrorAction SilentlyContinue',
+    'Start-Sleep -Milliseconds 600',
+    'Start-Process -FilePath $env:HALO_SETUP -ArgumentList ("/S /D=" + $env:HALO_DIR) -Wait',
+    'if ($env:HALO_RELAUNCH -eq "1" -and (Test-Path $env:HALO_EXE)) { Start-Process -FilePath $env:HALO_EXE }',
+  ].join('; ');
   const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psCmd], {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
-    env: { ...process.env, HALO_SETUP: updateState.installerPath, HALO_EXE: process.execPath },
+    env: {
+      ...process.env,
+      HALO_PID: String(process.pid),
+      HALO_SETUP: updateState.installerPath,
+      HALO_DIR: path.dirname(process.execPath),
+      HALO_EXE: process.execPath,
+      HALO_RELAUNCH: relaunch ? '1' : '0',
+    },
   });
   child.unref();
-  app.quit();
+  return true;
+}
+
+function installUpdate() {
+  if (launchPendingInstaller(true)) app.quit();
 }
 
 // ---------- the settings window ----------
@@ -1226,6 +1264,9 @@ app.whenReady().then(() => {
 app.on('second-instance', openSettings);
 app.on('before-quit', () => {
   quitting = true;
+  if (!installingUpdate && settings.autoUpdate && app.isPackaged && updateState.status === 'ready') {
+    launchPendingInstaller(false);
+  }
   clearTimeout(audioRetryTimer);
   globalShortcut.unregisterAll();
   if (mediaProc) mediaProc.kill();
