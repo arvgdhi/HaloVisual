@@ -9,6 +9,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win nsis --x64 --publish never",
+    "dist:store": "electron-builder --win appx --x64 --publish never",
     "fix-electron": "powershell -NoProfile -ExecutionPolicy Bypass -File fix-electron.ps1"
   },
   "devDependencies": {
@@ -69,6 +70,17 @@
       "deleteAppDataOnUninstall": false,
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico"
+    },
+    "appx": {
+      "applicationId": "Halo",
+      "displayName": "Halo",
+      "identityName": "REPLACE_WITH_PARTNER_CENTER_IDENTITY_NAME",
+      "publisher": "CN=REPLACE_WITH_PARTNER_CENTER_PUBLISHER_ID",
+      "publisherDisplayName": "Aarav Gandhi",
+      "backgroundColor": "#000000",
+      "languages": [
+        "en-US"
+      ]
     }
   },
   "repository": {

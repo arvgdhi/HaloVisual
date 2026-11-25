@@ -8,6 +8,7 @@ const readline = require('readline');
 const { spawn } = require('child_process');
 const mediaFilter = require('./media-filter');
 const REPO_SLUG = 'arvgdhi/HaloVisual';
+const isStoreBuild = Boolean(process.windowsStore);
 const apiUserAgent = () => `Halo/${app.getVersion()} (https://github.com/${REPO_SLUG})`;
 app.setAppUserModelId('com.halo.overlay');
 
@@ -625,7 +626,9 @@ function commit(patch) {
   if (!patch || !Object.keys(patch).length) return;
   const hadArt = needsArt();
   settings = { ...settings, ...patch };
-  if ('startWithWindows' in patch && app.isPackaged) app.setLoginItemSettings({ openAtLogin: !!patch.startWithWindows });
+  if ('startWithWindows' in patch && app.isPackaged) {
+    try { app.setLoginItemSettings({ openAtLogin: !!patch.startWithWindows }); } catch { /* Store/MSIX fallback */ }
+  }
   scheduleSave();
   applyLayerFlags();
   reconcileOverlays(true);
@@ -735,6 +738,7 @@ function cmpVer(a, b) {
 }
 
 async function checkForUpdates(manual = false) {
+  if (isStoreBuild) return;
   if (updateState.status === 'checking' || updateState.status === 'downloading') return;
   const prevReady = updateState.status === 'ready' && updateState.installerPath && fs.existsSync(updateState.installerPath) ? { ...updateState } : null;
   updateState = { ...updateState, status: 'checking', error: null };
@@ -820,6 +824,7 @@ async function checkForUpdates(manual = false) {
 }
 
 async function downloadUpdate() {
+  if (isStoreBuild) return;
   if (!updateState.assetUrl || !updateState.checksumUrl || updateState.status === 'downloading') return;
   if (!isTrustedUpdateUrl(updateState.assetUrl, true) || !isTrustedUpdateUrl(updateState.checksumUrl, true)) {
     updateState = { ...updateState, status: 'error', error: 'Untrusted update URL' };
@@ -935,6 +940,7 @@ function notifyUpdateReady() {
 
 let installingUpdate = false;
 function installUpdate() {
+  if (isStoreBuild) return;
   if (installingUpdate || updateState.status !== 'ready' || !updateState.installerPath || !updateState.sha256) return;
   const resolved = path.resolve(updateState.installerPath);
   const allowedDir = path.resolve(updateDir()) + path.sep;
@@ -973,6 +979,7 @@ function stateObj() {
     runtime: runtimeObj(),
     displays: displayList(),
     packaged: app.isPackaged,
+    storeBuild: isStoreBuild,
     version: app.getVersion(),
     update: { ...updateState },
   };
@@ -1451,8 +1458,10 @@ app.whenReady().then(() => {
     scheduleSave();
     openSettings();
   }
-  setTimeout(() => { if (settings.autoUpdate) checkForUpdates(false); }, 6000);
-  setInterval(() => { if (settings.autoUpdate) checkForUpdates(false); }, 12 * 60 * 60 * 1000);
+  if (!isStoreBuild) {
+    setTimeout(() => { if (settings.autoUpdate) checkForUpdates(false); }, 6000);
+    setInterval(() => { if (settings.autoUpdate) checkForUpdates(false); }, 12 * 60 * 60 * 1000);
+  }
 });
 
 app.on('second-instance', openSettings);

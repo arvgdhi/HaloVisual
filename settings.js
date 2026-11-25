@@ -581,16 +581,24 @@ function buildGeneral(sec) {
     h('div', { class: 'lab up-wrap' }, 'GitHub updates', upHint, upBar),
     h('div', { class: 'ctl' }, upBtn));
 
+  const updatesMod = st.storeBuild
+    ? mod('Updates', 'Updates are managed automatically by the Microsoft Store.')
+    : mod('Updates', 'Checks tagged releases on github.com/arvgdhi/HaloVisual and verifies SHA-256 checksums before installing.',
+      row('Auto-update from GitHub', 'Download verified tagged releases in the background and notify when ready', toggle('autoUpdate'), false, ico('sparkle', '#5e5ce6')),
+      upRow);
+
+  const privacyHint = st.storeBuild
+    ? 'Send song title and artist to LRCLIB and iTunes fallback (turn off for 100% offline use)'
+    : 'Send song title and artist to LRCLIB and iTunes fallback (turn off with updates for 100% offline use)';
+
   sec.append(
-    h('h1', null, 'General'), h('p', { class: 'lede' }, 'Startup, verified GitHub updates, privacy, shortcuts and quitting.'),
+    h('h1', null, 'General'), h('p', { class: 'lede' }, st.storeBuild ? 'Startup, privacy, shortcuts and quitting.' : 'Startup, verified GitHub updates, privacy, shortcuts and quitting.'),
     mod('Startup', null,
       row('Start Halo with Windows', st.packaged ? null : 'Available in the installed version (npm run dist)', toggle('startWithWindows', !st.packaged), false, ico('power', '#30d158')),
       row('Start minimized to tray', 'Launch directly in the background without opening this window', toggle('startMinimized'), false, ico('screen', '#0a84ff'))),
-    mod('Updates', 'Checks tagged releases on github.com/arvgdhi/HaloVisual and verifies SHA-256 checksums before installing.',
-      row('Auto-update from GitHub', 'Download verified tagged releases in the background and notify when ready', toggle('autoUpdate'), false, ico('sparkle', '#5e5ce6')),
-      upRow),
+    updatesMod,
     mod('Privacy & network', 'Halo collects zero analytics or telemetry. Loopback audio stays local and the microphone is never used.',
-      row('Online lyrics & cover art', 'Send song title and artist to LRCLIB and iTunes fallback (turn off with updates for 100% offline use)', toggle('onlineLookups'), false, ico('music', '#bf5af2'))),
+      row('Online lyrics & cover art', privacyHint, toggle('onlineLookups'), false, ico('music', '#bf5af2'))),
     mod('Shortcuts', 'These work from anywhere in Windows.',
       row('Edit layout on screen', null, h('kbd', null, 'Ctrl + Alt + L'), false, ico('keyboard', '#636366')),
       row('Quit Halo', null, h('kbd', null, 'Ctrl + Alt + Q'), false, ico('keyboard', '#636366')),
