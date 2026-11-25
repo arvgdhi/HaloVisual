@@ -3,7 +3,11 @@
 Free Windows desktop overlay: a music-reactive edge glow, synced lyrics in 21 styles, and a spinning record with the album cover as its label.
 
 Works with anything in the Windows media controls (Spotify app, Spotify web in Chrome/Edge, Apple Music, Media Player).
-
+<img width="2878" height="1799" alt="Screenshot 2026-11-24 201501" src="https://github.com/user-attachments/assets/8c3a4c30-7907-438b-9db9-c2fede447ada" />
+<img width="2878" height="1799" alt="Screenshot 2026-11-24 183200" src="https://github.com/user-attachments/assets/c8abcb94-5e6a-4979-bb85-d21f687fc7f0" />
+<img width="2878" height="1799" alt="Screenshot 2026-11-24 182739" src="https://github.com/user-attachments/assets/e295f6b2-6161-4df9-bd71-521d0eb055c7" />
+<img width="2878" height="1799" alt="Screenshot 2026-11-24 202123" src="https://github.com/user-attachments/assets/39cf61e4-4f3b-4310-bce8-01c7655a69bf" />
+<img width="2878" height="1799" alt="Screenshot 2026-11-24 201906" src="https://github.com/user-attachments/assets/ac5d1428-b5fa-475b-94d0-ad0aaa7d1d66" />
 ## Run
 
 Easiest: download `Halo-Setup-<version>.exe` from GitHub Releases (or build it yourself with `npm run dist`). To run from source:
