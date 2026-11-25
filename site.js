@@ -439,6 +439,22 @@
 
   // Installer resolution: check local dist/Halo-Setup-6.2.0.exe first;
   // only query GitHub Releases when dist/ is not hosted on this origin.
+  const REPO_SLUG = 'arvgdhi/HaloVisual';
+  const RELEASES_PAGE = `https://github.com/${REPO_SLUG}/releases/latest`;
+  const RELEASE_CACHE_KEY = 'halo_latest_release_v1';
+  const RELEASE_CACHE_TTL_MS = 15 * 60 * 1000;
+
+  function isTrustedReleaseUrl(rawUrl) {
+    try {
+      const u = new URL(rawUrl);
+      return u.protocol === 'https:' &&
+        u.hostname === 'github.com' &&
+        u.pathname.startsWith(`/${REPO_SLUG}/releases/download/`);
+    } catch {
+      return false;
+    }
+  }
+
   function applyInstallerLinks() {
     document.querySelectorAll('.js-installer-link').forEach((link) => {
       link.setAttribute('href', installerHref);
@@ -446,7 +462,7 @@
         link.setAttribute('download', installerName);
         link.removeAttribute('target');
         link.removeAttribute('rel');
-      } else if (installerStatus === 'github') {
+      } else if (installerStatus === 'github' || installerStatus === 'releases-page') {
         link.removeAttribute('download');
         link.setAttribute('target', '_blank');
         link.setAttribute('rel', 'noopener');
@@ -457,10 +473,13 @@
     const footerMeta = $('footer-installer-meta');
     if (installerStatus === 'local') {
       if (sub) sub.textContent = `v6.2.0 · ${installerName} (${installerSize}) · Windows 10 & 11 (x64)`;
-      if (footerMeta) footerMeta.textContent = `Local installer ready (${installerSize}) · Includes tray controls & auto-updater`;
+      if (footerMeta) footerMeta.textContent = `Local installer ready (${installerSize}) · Includes tray controls & verified updates`;
     } else if (installerStatus === 'github') {
-      if (sub) sub.textContent = `v6.2.0 · ${installerName} (${installerSize}) · GitHub Releases · Win 10 & 11 (x64)`;
-      if (footerMeta) footerMeta.textContent = `${installerName} (${installerSize}) · Auto-updates from GitHub Releases`;
+      if (sub) sub.textContent = `v6.2.0 · ${installerName} (${installerSize}) · SHA-256 verified on GitHub Releases · Win 10 & 11 (x64)`;
+      if (footerMeta) footerMeta.textContent = `${installerName} (${installerSize}) · Verified updates from GitHub Releases`;
+    } else if (installerStatus === 'releases-page') {
+      if (sub) sub.textContent = 'Download from GitHub Releases (with SHA256SUMS.txt) · Windows 10 & 11 (x64)';
+      if (footerMeta) footerMeta.textContent = 'Download latest Windows installer & SHA-256 checksums on GitHub Releases';
     } else if (installerStatus === 'unavailable') {
       if (sub) sub.textContent = 'v6.2.0 · GitHub Release pending or run from source · Windows 10 & 11 (x64)';
     }
@@ -468,7 +487,10 @@
 
   async function resolveInstallerTarget() {
     try {
-      const localRes = await fetch('dist/Halo-Setup-6.2.0.exe', { method: 'HEAD' });
+      const localRes = await fetch('dist/Halo-Setup-6.2.0.exe', {
+        method: 'HEAD',
+        signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined,
+      });
       if (localRes.ok) {
         const bytes = Number(localRes.headers.get('content-length')) || 84685248;
         installerSize = `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -481,27 +503,59 @@
     } catch { /* local dist not hosted on this origin */ }
 
     try {
-      const res = await fetch('https://api.github.com/repos/arvgdhi/HaloVisual/releases', {
-        headers: { Accept: 'application/vnd.github+json' },
-      });
-      if (res.ok) {
-        const releases = await res.json();
-        if (Array.isArray(releases)) {
-          for (const rel of releases) {
-            if (!rel || rel.draft) continue;
-            const asset = (rel.assets || []).find((a) => a && /^Halo-Setup-.*\.exe$/i.test(a.name));
-            if (asset && asset.browser_download_url) {
-              installerHref = asset.browser_download_url;
-              installerName = asset.name;
-              installerSize = asset.size ? `${(asset.size / (1024 * 1024)).toFixed(1)} MB` : '80.8 MB';
-              installerStatus = 'github';
-              applyInstallerLinks();
-              return;
-            }
-          }
+      const cachedRaw = window.sessionStorage?.getItem(RELEASE_CACHE_KEY);
+      if (cachedRaw) {
+        const cached = JSON.parse(cachedRaw);
+        if (cached && Date.now() - cached.at < RELEASE_CACHE_TTL_MS && isTrustedReleaseUrl(cached.href)) {
+          installerHref = cached.href;
+          installerName = cached.name;
+          installerSize = cached.size;
+          installerStatus = 'github';
+          applyInstallerLinks();
+          return;
         }
       }
-    } catch { /* fallback modal handles unavailable release */ }
+    } catch { /* ignore storage errors */ }
+
+    try {
+      const res = await fetch(`https://api.github.com/repos/${REPO_SLUG}/releases/latest`, {
+        headers: { Accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+      });
+      if (res.ok) {
+        const rel = await res.json();
+        const asset = rel && !rel.draft && !rel.prerelease
+          ? (rel.assets || []).find((a) => a && /^Halo-Setup-.*\.exe$/i.test(a.name))
+          : null;
+        if (asset && isTrustedReleaseUrl(asset.browser_download_url)) {
+          installerHref = asset.browser_download_url;
+          installerName = asset.name;
+          installerSize = asset.size ? `${(asset.size / (1024 * 1024)).toFixed(1)} MB` : '80.8 MB';
+          installerStatus = 'github';
+          try {
+            window.sessionStorage?.setItem(RELEASE_CACHE_KEY, JSON.stringify({
+              at: Date.now(),
+              href: installerHref,
+              name: installerName,
+              size: installerSize,
+            }));
+          } catch { /* ignore storage errors */ }
+          applyInstallerLinks();
+          return;
+        }
+      } else if (res.status === 403 || res.status === 429) {
+        // Rate-limited by GitHub API; link directly to the non-rate-limited Releases page.
+        installerHref = RELEASES_PAGE;
+        installerStatus = 'releases-page';
+        applyInstallerLinks();
+        return;
+      }
+    } catch {
+      installerHref = RELEASES_PAGE;
+      installerStatus = 'releases-page';
+      applyInstallerLinks();
+      return;
+    }
 
     installerStatus = 'unavailable';
     applyInstallerLinks();

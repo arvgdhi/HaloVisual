@@ -1084,8 +1084,6 @@
         const fs = nativeSize(S, 13, 26, 0.5).toFixed(1) + 'px';
         if (fs !== lastFs) { lastFs = fs; root.style.fontSize = fs; }
         if (idx !== curIdx) {
-          lastDash = '';
-          lastMeTf = '';
           const inc = idx === curIdx + 1;
           if (!inc) { for (const r of els.values()) r.remove(); els.clear(); }
           const keep = [];

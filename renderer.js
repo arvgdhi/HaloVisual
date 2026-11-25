@@ -61,19 +61,20 @@ halo.on('lyrics', (l) => {
   if (!S.paused && (lines || S.editMode)) wakeLoop();
 });
 halo.on('art', (b64) => {
-  lastArtB64 = b64 || null;
-  const url = b64 ? `url(data:image/jpeg;base64,${b64})` : '';
+  const safeB64 = typeof b64 === 'string' && b64.length > 0 && /^[A-Za-z0-9+/=]+$/.test(b64) ? b64 : null;
+  lastArtB64 = safeB64;
+  const url = safeB64 ? `url("data:image/jpeg;base64,${safeB64}")` : '';
   labelEl.style.backgroundImage = url;
   artfullEl.style.backgroundImage = url;
   sleeveArtEl.style.backgroundImage = url;
-  if (!b64) {
+  if (!safeB64) {
     albumColors = null;
     lastExtractedB64 = null;
     applyLayout();
   } else if (S.useAlbum || S.lyricColor === 'album') {
-    extractColors(b64);
+    extractColors(safeB64);
   }
-  if (!S.paused && b64) wakeLoop();
+  if (!S.paused && safeB64) wakeLoop();
 });
 halo.on('audio-frame', (d) => {
   if (!d || S.here.audioOwner) return;

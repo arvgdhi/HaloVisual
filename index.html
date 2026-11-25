@@ -305,10 +305,10 @@
               <div class="card-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M12 4v10m0 0-4-4m4 4 4-4M5 19h14" /></svg>
               </div>
-              <h3>Automatic updates</h3>
+              <h3>Verified updates</h3>
               <div class="card-body">
                 <p>
-                  Checks GitHub Releases on launch and in the background, downloads new builds quietly, notifies you when ready, and installs automatically when Halo closes.
+                  Checks tagged GitHub Releases in the background, verifies each download against its published SHA-256 checksum, and notifies you so you can install and restart when ready.
                 </p>
               </div>
             </article>
@@ -363,7 +363,7 @@
               <summary>Windows SmartScreen note &amp; run from source (<code>npm start</code>)</summary>
               <div class="details-body">
                 <p>
-                  Because Halo is an independent open-source build without an Authenticode certificate, Windows may show <strong>Windows protected your PC</strong> on first launch. Click <strong>More info</strong> -> <strong>Run anyway</strong>, or run directly from source:
+                  Because Halo is an independent open-source build without an Authenticode certificate, Windows may show <strong>Windows protected your PC</strong> on first launch. You can verify the installer against <code>SHA256SUMS.txt</code> on GitHub Releases, then click <strong>More info</strong> -&gt; <strong>Run anyway</strong>, or run directly from source:
                 </p>
                 <div class="cmd-row">
                   <code>git clone https://github.com/arvgdhi/HaloVisual.git &amp;&amp; cd HaloVisual &amp;&amp; npm install &amp;&amp; npm start</code>
@@ -407,11 +407,13 @@
     <div class="container footer-inner">
       <div class="footer-brand">
         <img src="build/logo.png" width="22" height="22" alt="" loading="lazy">
-        <span>Halo v6.2.0 · MIT License · Synced lyrics by LRCLIB · UI font Google Sans</span>
+        <span>Halo v6.2.0 · MIT License · Lyrics by LRCLIB · UI font Google Sans (SIL OFL) · Independent project</span>
       </div>
       <div class="footer-links">
         <a href="#showcase">Showcase</a>
         <a href="#features">Features</a>
+        <a href="https://github.com/arvgdhi/HaloVisual/blob/main/PRIVACY.md" target="_blank" rel="noopener">Privacy</a>
+        <a href="https://github.com/arvgdhi/HaloVisual/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
         <a href="https://github.com/arvgdhi/HaloVisual" target="_blank" rel="noopener">GitHub</a>
       </div>
     </div>

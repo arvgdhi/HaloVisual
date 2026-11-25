@@ -28,7 +28,7 @@ The settings window opens alongside the desktop overlay when you launch Halo, an
 - **Record**: six styles (Classic Vinyl, Picture Disc, Neon Acrylic, Holographic CD, Turntable Deck, Album Sleeve), show, size, rotation.
 - **Layout**: edit on screen, lyric rotation, reset positions, layer (behind or above apps), fade-after-pause seconds (0 = never), only react to music (ignores Shorts, Reels and other browser videos).
 - **Performance**: quick presets (High quality, Balanced, Low-end / Eco), automatic pausing in fullscreen or behind maximized windows, battery eco/pause mode, frame rate limit, glow resolution scaling, Lite mode (reduced effects), and audio-capture toggle.
-- **General**: start with Windows (installed build only), start minimized to tray, automatic GitHub updates, shortcuts, quit.
+- **General**: start with Windows (installed build only), start minimized to tray, SHA-256 verified GitHub updates, online lyrics & cover art privacy toggle, shortcuts, quit.
 
 When you turn on **Edit on screen** (`Ctrl+Alt+L`) while nothing is playing, your screen shows a sample song so you can preview each style and position the overlay. (It sits on the desktop layer, so set Layout > Layer to "Above apps", or use Edit on screen, if windows are covering it.)
 
@@ -53,12 +53,16 @@ Each style has a recommended box size, applied automatically when you pick it un
 - Beat pulse reacts to the system audio, so it needs audio capture to be running (it is, by default).
 - Cover art comes from Windows, with an iTunes lookup as fallback.
 - Icons in Visual, Fisheye Visual and Code Visual are emoji matched to the words in the line.
-- System audio is captured through Electron's loopback capture. Nothing is saved and the microphone is never used.
-- Install it like normal software: run `Halo-Setup-<version>.exe` (see Releases, or the latest Actions run > Artifacts). It installs for your user (no admin prompt), adds Start menu and desktop shortcuts, and can be removed from Windows Settings > Apps. Turn on General > "Start Halo with Windows" to launch it at sign-in.
-- The installer is not code-signed, so Windows SmartScreen may say "unknown publisher": choose More info > Run anyway.
-- To build the installer yourself on Windows: `npm install` then `npm run dist` (output in `dist`).
-- On GitHub: every push to `main` builds the installer (Actions > latest run > Artifacts). Push a tag like `v6.2.0` and it is also published as a Release download.
+- **Privacy**: See [PRIVACY.md](PRIVACY.md). System audio is captured locally through Electron's loopback capture — nothing is recorded or sent over the network, and the microphone is never used. You can disable **Online lyrics & cover art** and **Auto-update from GitHub** under Settings > General to run 100% offline.
+- **Fullscreen games, anti-cheat & DRM**: Halo automatically pauses behind fullscreen apps by default. If a strict game anti-cheat, banking app, or proctored exam flags desktop audio loopback capture, toggle **Audio-reactive effects** off in Settings > Performance (or quit Halo with `Ctrl+Alt+Q`).
+- Install it like normal software: run `Halo-Setup-<version>.exe` from GitHub Releases (with matching `SHA256SUMS.txt`). It installs for your user (no admin prompt), adds Start menu and desktop shortcuts, and can be removed from Windows Settings > Apps. Turn on General > "Start Halo with Windows" to launch it at sign-in.
+- **Updates**: Installed copies check tagged GitHub Releases (`v*`), verify the downloaded installer against `SHA256SUMS.txt`, and prompt you to click **Install & restart** when ready.
+- The installer is not code-signed yet, so Windows SmartScreen may say "unknown publisher": verify the hash against `SHA256SUMS.txt`, then choose More info > Run anyway.
+- To build the installer yourself on Windows: `npm ci` then `npm run dist` (output in `dist`).
+- On GitHub: every push to `main` builds a CI artifact (Actions > latest run > Artifacts). Push a semver tag like `v6.2.1` to publish a public GitHub Release with `Halo-Setup-<version>.exe` and `SHA256SUMS.txt`.
 
-## Credits
+## License & Credits
 
-UI font: Google Sans (SIL Open Font License, see `fonts/OFL-GoogleSans.txt`).
+- Licensed under the [MIT License](LICENSE) — provided "as is", without warranty of any kind.
+- UI font: Google Sans (SIL Open Font License 1.1, see [fonts/OFL-GoogleSans.txt](fonts/OFL-GoogleSans.txt)).
+- Halo (HaloVisual) is an independent open-source project and is not affiliated with, endorsed by, or sponsored by Microsoft, Spotify, Apple, or Google.

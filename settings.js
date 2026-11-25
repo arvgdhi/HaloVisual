@@ -562,7 +562,7 @@ function buildGeneral(sec) {
       upHint.textContent = `Downloading ${u.releaseName || ('v' + u.version)} (${u.progress || 0}%)`;
       upBtn.textContent = 'Downloading\u2026';
     } else if (u.status === 'ready') {
-      upHint.textContent = `${u.releaseName || ('v' + u.version)} ready \u2014 installs automatically on quit, or restart now`;
+      upHint.textContent = `${u.releaseName || ('v' + u.version)} verified (SHA-256) \u2014 click Install & restart when ready`;
       upBtn.textContent = 'Install & restart';
     } else if (u.status === 'up-to-date') {
       upHint.textContent = `Halo v${st.version} is up to date`;
@@ -582,18 +582,20 @@ function buildGeneral(sec) {
     h('div', { class: 'ctl' }, upBtn));
 
   sec.append(
-    h('h1', null, 'General'), h('p', { class: 'lede' }, 'Startup, automatic GitHub updates, shortcuts and quitting.'),
+    h('h1', null, 'General'), h('p', { class: 'lede' }, 'Startup, verified GitHub updates, privacy, shortcuts and quitting.'),
     mod('Startup', null,
       row('Start Halo with Windows', st.packaged ? null : 'Available in the installed version (npm run dist)', toggle('startWithWindows', !st.packaged), false, ico('power', '#30d158')),
       row('Start minimized to tray', 'Launch directly in the background without opening this window', toggle('startMinimized'), false, ico('screen', '#0a84ff'))),
-    mod('Updates', 'Checks github.com/arvgdhi/HaloVisual for newer installer releases.',
-      row('Auto-update from GitHub', 'Download new releases in the background and install automatically on quit', toggle('autoUpdate'), false, ico('sparkle', '#5e5ce6')),
+    mod('Updates', 'Checks tagged releases on github.com/arvgdhi/HaloVisual and verifies SHA-256 checksums before installing.',
+      row('Auto-update from GitHub', 'Download verified tagged releases in the background and notify when ready', toggle('autoUpdate'), false, ico('sparkle', '#5e5ce6')),
       upRow),
+    mod('Privacy & network', 'Halo collects zero analytics or telemetry. Loopback audio stays local and the microphone is never used.',
+      row('Online lyrics & cover art', 'Send song title and artist to LRCLIB and iTunes fallback (turn off with updates for 100% offline use)', toggle('onlineLookups'), false, ico('music', '#bf5af2'))),
     mod('Shortcuts', 'These work from anywhere in Windows.',
       row('Edit layout on screen', null, h('kbd', null, 'Ctrl + Alt + L'), false, ico('keyboard', '#636366')),
       row('Quit Halo', null, h('kbd', null, 'Ctrl + Alt + Q'), false, ico('keyboard', '#636366')),
       row('Leave edit mode', null, h('kbd', null, 'Esc'), false, ico('keyboard', '#636366'))),
-    mod('About', 'Lyrics from LRCLIB, covers from Windows with an iTunes fallback. Audio is captured as loopback only; nothing is saved and the microphone is never used.',
+    mod('About', 'MIT License \u00b7 Lyrics from LRCLIB, covers from Windows with an iTunes fallback \u00b7 UI font Google Sans (SIL OFL). Independent open-source project, not affiliated with Microsoft, Spotify, Apple, or Google.',
       row(ver, null, h('button', { class: 'btn danger', type: 'button', onclick: () => hs.act('quit') }, 'Quit Halo'), false, ico('info', '#636366'))),
   );
 }

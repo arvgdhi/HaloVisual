@@ -3,9 +3,12 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const readline = require('readline');
 const { spawn } = require('child_process');
 const mediaFilter = require('./media-filter');
+const REPO_SLUG = 'arvgdhi/HaloVisual';
+const apiUserAgent = () => `Halo/${app.getVersion()} (https://github.com/${REPO_SLUG})`;
 app.setAppUserModelId('com.halo.overlay');
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -111,6 +114,7 @@ const DEFAULTS = {
   discG: null,             // same for the record
   startWithWindows: false,
   autoUpdate: true,
+  onlineLookups: true,
   installedAssetId: null,
   settingsShown: false,
   pauseFullscreen: true,
@@ -398,6 +402,11 @@ function reconcileOverlays(forceSettings = false) {
   }
 }
 
+function hardenWindow(win) {
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
+}
+
 function createOverlay(display) {
   const { x, y, width, height } = display.bounds;
   const win = new BrowserWindow({
@@ -415,11 +424,15 @@ function createOverlay(display) {
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
       backgroundThrottling: false,
       autoplayPolicy: 'no-user-gesture-required',
       spellcheck: false,
     },
   });
+  hardenWindow(win);
   win.displayId = display.id;
   win.paused = false;
   win.pauseReason = null;
@@ -560,7 +573,7 @@ const NUM = {
 };
 const BOOL = [
   'glow', 'lyrics', 'showDisc', 'idleGlow', 'rainbow', 'useAlbum', 'lineBlur', 'bold',
-  'startWithWindows', 'musicOnly', 'autoUpdate',
+  'startWithWindows', 'musicOnly', 'autoUpdate', 'onlineLookups',
   'pauseFullscreen', 'pauseMaximized', 'reducedEffects', 'audioReactive', 'startMinimized',
 ];
 
@@ -617,6 +630,13 @@ function commit(patch) {
   applyLayerFlags();
   reconcileOverlays(true);
   if ('musicOnly' in patch) applySessions(lastSessions);
+  if ('onlineLookups' in patch && patch.onlineLookups && currentKey && lastMedia && !lastMedia.none) {
+    if (!lastLyrics.lines) loadLyrics(lastMedia);
+    if (needsArt() && !lastArt) {
+      const token = ++artToken;
+      setTimeout(() => { if (token === artToken && !lastArt) fetchArtFallback(lastMedia, token); }, 800);
+    }
+  }
   if (!hadArt && needsArt() && currentKey && !lastArt && lastMedia && !lastMedia.none) {
     if (lastMedia.hasThumb && thumbRequestedFor !== currentKey && mediaProc && mediaProc.stdin.writable) {
       thumbRequestedFor = currentKey;
@@ -631,7 +651,16 @@ function commit(patch) {
 }
 ipcMain.on('prefs', (_e, d) => commit(sanitize(d)));
 
-// ---------- GitHub auto-updater ----------
+// ---------- GitHub auto-updater (tagged releases + SHA-256 verified) ----------
+const ALLOWED_UPDATE_HOSTS = new Set([
+  'github.com',
+  'objects.githubusercontent.com',
+  'release-assets.githubusercontent.com',
+]);
+const SHA256_RE = /^[a-f0-9]{64}$/i;
+const SEMVER_TAG_RE = /^v?(\d+\.\d+\.\d+(?:-[0-9a-z.-]+)?)$/i;
+const updateDir = () => path.join(app.getPath('userData'), 'updates');
+
 let updateState = {
   status: 'idle',
   version: null,
@@ -642,7 +671,58 @@ let updateState = {
   assetId: null,
   assetUrl: null,
   assetName: null,
+  checksumUrl: null,
+  sha256: null,
 };
+let lastReleaseEtag = null;
+let lastReleaseJson = null;
+
+function isTrustedUpdateUrl(rawUrl, requireRepoPrefix = false) {
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol !== 'https:') return false;
+    if (requireRepoPrefix) {
+      return u.hostname === 'github.com' && u.pathname.startsWith(`/${REPO_SLUG}/releases/download/`);
+    }
+    return ALLOWED_UPDATE_HOSTS.has(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function parseSha256ForFile(text, fileName) {
+  const want = path.basename(fileName || '').toLowerCase();
+  if (!want || typeof text !== 'string') return null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const m = line.match(/^([a-f0-9]{64})\s+\*?(.+)$/i);
+    if (!m) continue;
+    const entryName = path.basename(m[2].trim().replace(/^["']|["']$/g, '')).toLowerCase();
+    if (entryName === want) return m[1].toLowerCase();
+  }
+  return null;
+}
+
+function hashFileSha256(filePath) {
+  const hash = crypto.createHash('sha256');
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const buf = Buffer.allocUnsafe(64 * 1024);
+    let n = 0;
+    while ((n = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
+      hash.update(buf.subarray(0, n));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest('hex');
+}
+
+function digestsEqual(a, b) {
+  if (!SHA256_RE.test(a || '') || !SHA256_RE.test(b || '')) return false;
+  return crypto.timingSafeEqual(Buffer.from(a.toLowerCase(), 'hex'), Buffer.from(b.toLowerCase(), 'hex'));
+}
 
 function cmpVer(a, b) {
   const pa = String(a || '').replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
@@ -660,47 +740,57 @@ async function checkForUpdates(manual = false) {
   updateState = { ...updateState, status: 'checking', error: null };
   sendState();
   try {
-    const r = await fetch('https://api.github.com/repos/arvgdhi/HaloVisual/releases', {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Halo/${app.getVersion()}` },
+    const headers = { Accept: 'application/vnd.github+json', 'User-Agent': apiUserAgent() };
+    if (lastReleaseEtag) headers['If-None-Match'] = lastReleaseEtag;
+    const r = await fetch(`https://api.github.com/repos/${REPO_SLUG}/releases/latest`, {
+      headers,
+      signal: AbortSignal.timeout(15000),
     });
-    if (!r.ok) throw new Error(`GitHub HTTP ${r.status}`);
-    const releases = await r.json();
-    const candidates = [];
-    for (const rel of Array.isArray(releases) ? releases : []) {
-      if (!rel || rel.draft) continue;
-      const asset = (rel.assets || []).find((a) => a && /^Halo-Setup-.*\.exe$/i.test(a.name));
-      if (!asset || !asset.browser_download_url) continue;
-      const tagVer = String(rel.tag_name || '').replace(/^v/i, '');
-      const nameVer = asset.name.match(/Halo-Setup-(.+?)\.exe$/i);
-      const ver = /^\d+\.\d+/.test(tagVer) ? tagVer : (nameVer ? nameVer[1] : app.getVersion());
-      candidates.push({ rel, asset, ver });
+    let rel = null;
+    if (r.status === 304 && lastReleaseJson) {
+      rel = lastReleaseJson;
+    } else if (r.status === 404) {
+      updateState = {
+        status: 'up-to-date', version: app.getVersion(), releaseName: null, progress: 0, error: null,
+        installerPath: null, assetId: null, assetUrl: null, assetName: null, checksumUrl: null, sha256: null,
+      };
+      sendState();
+      return;
+    } else if (!r.ok) {
+      throw new Error(r.status === 403 ? 'GitHub rate limit reached; try again later' : `GitHub HTTP ${r.status}`);
+    } else {
+      rel = await r.json();
+      const etag = r.headers.get('etag');
+      if (etag) lastReleaseEtag = etag;
+      lastReleaseJson = rel;
     }
-    candidates.sort((a, b) => {
-      const vd = cmpVer(b.ver, a.ver);
-      if (vd !== 0) return vd;
-      return Date.parse(b.asset.updated_at || 0) - Date.parse(a.asset.updated_at || 0);
-    });
 
-    const best = candidates[0];
-    let localMtime = 0;
-    try { localMtime = fs.statSync(process.execPath).mtimeMs; } catch { /* ignore */ }
-    const assetUpdatedMs = Date.parse(best && best.asset ? (best.asset.updated_at || 0) : 0);
-    const latestGraceMs = settings.installedAssetId ? 60000 : 5 * 60 * 1000;
-    const isNewer = best && (
-      cmpVer(best.ver, app.getVersion()) > 0 ||
-      (best.rel.tag_name === 'latest' && app.isPackaged && best.asset.id !== settings.installedAssetId && assetUpdatedMs > localMtime + latestGraceMs)
+    const tagMatch = rel && !rel.draft && !rel.prerelease ? String(rel.tag_name || '').match(SEMVER_TAG_RE) : null;
+    const assets = Array.isArray(rel && rel.assets) ? rel.assets : [];
+    const asset = tagMatch ? assets.find((a) => a && /^Halo-Setup-\d+\.\d+\.\d+.*\.exe$/i.test(a.name)) : null;
+    const checksumAsset = tagMatch ? assets.find((a) => a && /^SHA256SUMS\.txt$/i.test(a.name)) : null;
+    const ver = tagMatch ? tagMatch[1] : null;
+    const isNewer = Boolean(
+      ver &&
+      asset &&
+      isTrustedUpdateUrl(asset.browser_download_url, true) &&
+      cmpVer(ver, app.getVersion()) > 0
     );
 
     if (!isNewer) {
       updateState = {
         status: 'up-to-date', version: app.getVersion(), releaseName: null, progress: 0, error: null,
-        installerPath: null, assetId: null, assetUrl: null, assetName: null,
+        installerPath: null, assetId: null, assetUrl: null, assetName: null, checksumUrl: null, sha256: null,
       };
       sendState();
       return;
     }
 
-    if (prevReady && prevReady.assetId === best.asset.id) {
+    if (!checksumAsset || !isTrustedUpdateUrl(checksumAsset.browser_download_url, true)) {
+      throw new Error('Release is missing SHA256SUMS.txt verification file');
+    }
+
+    if (prevReady && prevReady.assetId === asset.id && prevReady.sha256) {
       updateState = prevReady;
       sendState();
       return;
@@ -708,14 +798,16 @@ async function checkForUpdates(manual = false) {
 
     updateState = {
       status: 'available',
-      version: best.ver,
-      releaseName: best.rel.name || best.rel.tag_name || `v${best.ver}`,
+      version: ver,
+      releaseName: rel.name || rel.tag_name || `v${ver}`,
       progress: 0,
       error: null,
       installerPath: null,
-      assetId: best.asset.id,
-      assetUrl: best.asset.browser_download_url,
-      assetName: best.asset.name,
+      assetId: asset.id,
+      assetUrl: asset.browser_download_url,
+      assetName: asset.name,
+      checksumUrl: checksumAsset.browser_download_url,
+      sha256: null,
     };
     console.log('[update] available:', updateState.releaseName, updateState.assetName);
     sendState();
@@ -728,19 +820,47 @@ async function checkForUpdates(manual = false) {
 }
 
 async function downloadUpdate() {
-  if (!updateState.assetUrl || updateState.status === 'downloading') return;
-  const safeName = path.basename(updateState.assetName || 'Halo-Setup.exe');
-  const dest = path.join(app.getPath('temp'), safeName);
-  const part = dest + '.part';
+  if (!updateState.assetUrl || !updateState.checksumUrl || updateState.status === 'downloading') return;
+  if (!isTrustedUpdateUrl(updateState.assetUrl, true) || !isTrustedUpdateUrl(updateState.checksumUrl, true)) {
+    updateState = { ...updateState, status: 'error', error: 'Untrusted update URL' };
+    sendState();
+    return;
+  }
+  const safeName = path.basename(updateState.assetName || '');
+  if (!/^Halo-Setup-\d+\.\d+\.\d+.*\.exe$/i.test(safeName)) {
+    updateState = { ...updateState, status: 'error', error: 'Invalid installer filename' };
+    sendState();
+    return;
+  }
+  const dir = updateDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const dest = path.join(dir, safeName);
+  const part = `${dest}.${Date.now()}.part`;
   updateState = { ...updateState, status: 'downloading', progress: 0, error: null };
   sendState();
   try {
-    const r = await fetch(updateState.assetUrl, { headers: { 'User-Agent': `Halo/${app.getVersion()}` } });
-    if (!r.ok || !r.body) throw new Error(`Download HTTP ${r.status}`);
+    const sumRes = await fetch(updateState.checksumUrl, {
+      headers: { 'User-Agent': apiUserAgent() },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!sumRes.ok || (sumRes.url && !isTrustedUpdateUrl(sumRes.url, false))) {
+      throw new Error(`Checksum HTTP ${sumRes.status}`);
+    }
+    const expectedSha = parseSha256ForFile(await sumRes.text(), safeName);
+    if (!expectedSha) throw new Error('SHA-256 entry missing for installer');
+
+    const r = await fetch(updateState.assetUrl, {
+      headers: { 'User-Agent': apiUserAgent() },
+      signal: AbortSignal.timeout(5 * 60 * 1000),
+    });
+    if (!r.ok || !r.body || (r.url && !isTrustedUpdateUrl(r.url, false))) {
+      throw new Error(`Download HTTP ${r.status}`);
+    }
     const total = Number(r.headers.get('content-length')) || 0;
     let loaded = 0;
     let lastEmit = 0;
-    const out = fs.createWriteStream(part);
+    const hash = crypto.createHash('sha256');
+    const out = fs.createWriteStream(part, { mode: 0o600 });
     let writeErr = null;
     out.on('error', (err) => { writeErr = err; });
     const reader = r.body.getReader();
@@ -748,6 +868,7 @@ async function downloadUpdate() {
       if (writeErr) throw writeErr;
       const { done, value } = await reader.read();
       if (done) break;
+      hash.update(value);
       if (!out.write(value)) {
         await new Promise((resolve, reject) => {
           if (writeErr) return reject(writeErr);
@@ -767,9 +888,25 @@ async function downloadUpdate() {
     }
     if (writeErr) throw writeErr;
     await new Promise((resolve, reject) => out.end((err) => (err ? reject(err) : resolve())));
+
+    const actualSha = hash.digest('hex');
+    if (!digestsEqual(actualSha, expectedSha)) {
+      throw new Error('Integrity check failed (SHA-256 mismatch)');
+    }
+
+    // Clean out previous downloaded installers in the private updates folder
+    try {
+      for (const entry of fs.readdirSync(dir)) {
+        const full = path.join(dir, entry);
+        if (full !== part && full !== dest) {
+          try { fs.unlinkSync(full); } catch { /* ignore */ }
+        }
+      }
+    } catch { /* ignore */ }
+
     fs.renameSync(part, dest);
-    updateState = { ...updateState, status: 'ready', progress: 100, installerPath: dest, error: null };
-    console.log('[update] downloaded to', dest);
+    updateState = { ...updateState, status: 'ready', progress: 100, installerPath: dest, sha256: actualSha, error: null };
+    console.log('[update] downloaded and verified:', dest);
     sendState();
     scheduleTray();
     notifyUpdateReady();
@@ -789,7 +926,7 @@ function notifyUpdateReady() {
   const label = updateState.releaseName || ('v' + updateState.version);
   const n = new Notification({
     title: 'Halo update ready',
-    body: `${label} will install automatically when Halo closes. Click to install and restart now.`,
+    body: `${label} is verified and ready. Click to launch the installer and restart Halo.`,
     icon: path.join(__dirname, 'build', 'icon.png'),
   });
   n.on('click', () => installUpdate());
@@ -797,38 +934,34 @@ function notifyUpdateReady() {
 }
 
 let installingUpdate = false;
-function launchPendingInstaller(relaunch) {
-  if (installingUpdate || updateState.status !== 'ready' || !updateState.installerPath || !fs.existsSync(updateState.installerPath)) {
-    return false;
+function installUpdate() {
+  if (installingUpdate || updateState.status !== 'ready' || !updateState.installerPath || !updateState.sha256) return;
+  const resolved = path.resolve(updateState.installerPath);
+  const allowedDir = path.resolve(updateDir()) + path.sep;
+  if (!resolved.startsWith(allowedDir) || !fs.existsSync(resolved)) {
+    updateState = { ...updateState, status: 'error', error: 'Installer file missing; please re-download' };
+    sendState();
+    return;
+  }
+  try {
+    const diskSha = hashFileSha256(resolved);
+    if (!digestsEqual(diskSha, updateState.sha256)) {
+      try { fs.unlinkSync(resolved); } catch { /* ignore */ }
+      updateState = { ...updateState, status: 'error', installerPath: null, error: 'Installer changed on disk (SHA-256 mismatch)' };
+      sendState();
+      return;
+    }
+  } catch (e) {
+    updateState = { ...updateState, status: 'error', error: e.message || 'Could not verify installer' };
+    sendState();
+    return;
   }
   installingUpdate = true;
   settings.installedAssetId = updateState.assetId;
   try { fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2)); } catch { /* ignore */ }
-  const psCmd = [
-    'Wait-Process -Id ([int]$env:HALO_PID) -Timeout 20 -ErrorAction SilentlyContinue',
-    'Start-Sleep -Milliseconds 600',
-    'Start-Process -FilePath $env:HALO_SETUP -ArgumentList ("/S /D=" + $env:HALO_DIR) -Wait',
-    'if ($env:HALO_RELAUNCH -eq "1" -and (Test-Path $env:HALO_EXE)) { Start-Process -FilePath $env:HALO_EXE }',
-  ].join('; ');
-  const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psCmd], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-    env: {
-      ...process.env,
-      HALO_PID: String(process.pid),
-      HALO_SETUP: updateState.installerPath,
-      HALO_DIR: path.dirname(process.execPath),
-      HALO_EXE: process.execPath,
-      HALO_RELAUNCH: relaunch ? '1' : '0',
-    },
-  });
+  const child = spawn(resolved, [], { detached: true, stdio: 'ignore' });
   child.unref();
-  return true;
-}
-
-function installUpdate() {
-  if (launchPendingInstaller(true)) app.quit();
+  app.quit();
 }
 
 // ---------- the settings window ----------
@@ -867,8 +1000,15 @@ function openSettings() {
   settingsWin = new BrowserWindow({
     width: 1060, height: 760, minWidth: 820, minHeight: 580,
     backgroundColor: '#000000', title: 'Halo', icon: path.join(__dirname, 'build', 'icon.png'), autoHideMenuBar: true, show: false,
-    webPreferences: { preload: path.join(__dirname, 'settings-preload.js'), spellcheck: false },
+    webPreferences: {
+      preload: path.join(__dirname, 'settings-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: false,
+    },
   });
+  hardenWindow(settingsWin);
   settingsWin.removeMenu();
   if (editMode) settingsWin.setAlwaysOnTop(true, 'screen-saver');
   settingsWin.loadFile(path.join(__dirname, 'settings.html'));
@@ -935,14 +1075,18 @@ function isAllowedPermission(permission, details) {
   }
   return false;
 }
+function isLocalOrigin(wc, origin) {
+  const url = origin || (wc && !wc.isDestroyed() ? wc.getURL() : '');
+  return !url || url === 'null' || url.startsWith('file://');
+}
 function setupLoopback() {
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) => {
-    const ok = isAllowedPermission(permission, details);
+  session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => {
+    const ok = isLocalOrigin(wc, details && details.requestingUrl) && isAllowedPermission(permission, details);
     if (!ok) console.log('[perm denied]', permission, details && details.mediaTypes);
     cb(ok);
   });
-  session.defaultSession.setPermissionCheckHandler((_wc, permission, _origin, details) => {
-    const ok = isAllowedPermission(permission, details);
+  session.defaultSession.setPermissionCheckHandler((wc, permission, origin, details) => {
+    const ok = isLocalOrigin(wc, origin) && isAllowedPermission(permission, details);
     if (!ok) console.log('[perm check denied]', permission, details && details.mediaType);
     return ok;
   });
@@ -1026,6 +1170,22 @@ function buildTray() {
 
 // ---------- lyrics (LRCLIB, free, no key) ----------
 let lyricToken = 0;
+const lyricsCache = new Map();
+const artCache = new Map();
+const CACHE_LIMIT = 100;
+
+function cacheSet(map, key, val) {
+  if (map.has(key)) map.delete(key);
+  map.set(key, val);
+  if (map.size > CACHE_LIMIT) map.delete(map.keys().next().value);
+}
+
+function canQueryExternalApis(m) {
+  if (!settings.onlineLookups || !m) return false;
+  // Even if musicOnly is off, never send comms/social/video-call titles to external APIs.
+  if (mediaFilter.classifyApp(m.app) === 'blocked') return false;
+  return true;
+}
 
 function parseLrc(text) {
   const out = [];
@@ -1039,7 +1199,10 @@ function parseLrc(text) {
 }
 
 async function fetchJson(url) {
-  const r = await fetch(url, { headers: { 'User-Agent': 'Halo/6.0 (personal overlay)' } });
+  const r = await fetch(url, {
+    headers: { 'User-Agent': apiUserAgent() },
+    signal: AbortSignal.timeout(10000),
+  });
   return r.ok ? r.json() : null;
 }
 
@@ -1047,7 +1210,15 @@ async function loadLyrics(m) {
   const token = ++lyricToken;
   lastLyrics = { lines: null };
   broadcast('lyrics', lastLyrics);
-  if (!m.title) return;
+  if (!m.title || !canQueryExternalApis(m)) return;
+
+  const cacheKey = `${(m.artist || '').toLowerCase()}|${m.title.toLowerCase()}|${Math.round((m.durMs || 0) / 1000)}`;
+  if (lyricsCache.has(cacheKey)) {
+    lastLyrics = { lines: lyricsCache.get(cacheKey) };
+    broadcast('lyrics', lastLyrics);
+    return;
+  }
+
   let data = null;
   try {
     const q = new URLSearchParams({ artist_name: m.artist || '', track_name: m.title });
@@ -1066,24 +1237,47 @@ async function loadLyrics(m) {
     }
   } catch (e) { console.log('[lyrics] lookup failed:', e.message); }
   if (token !== lyricToken) return; // track changed meanwhile
-  lastLyrics = { lines: data && data.syncedLyrics ? parseLrc(data.syncedLyrics) : null };
+  const parsed = data && data.syncedLyrics ? parseLrc(data.syncedLyrics) : null;
+  cacheSet(lyricsCache, cacheKey, parsed);
+  lastLyrics = { lines: parsed };
   console.log('[lyrics]', lastLyrics.lines ? `${lastLyrics.lines.length} lines` : 'none found', '-', m.artist, '-', m.title);
   broadcast('lyrics', lastLyrics);
 }
 
 // ---------- album cover fallback (iTunes search, free, no key) ----------
 let artToken = 0;
+function isTrustedArtUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    return u.protocol === 'https:' && (u.hostname === 'mzstatic.com' || u.hostname.endsWith('.mzstatic.com'));
+  } catch {
+    return false;
+  }
+}
+
 async function fetchArtFallback(m, token) {
   try {
-    if (!m.title || !m.artist) return;
+    if (!m.title || !m.artist || !canQueryExternalApis(m)) return;
+    const sz = settings.discSize <= 260 ? '300x300bb' : '600x600bb';
+    const cacheKey = `${m.artist.toLowerCase()}|${m.title.toLowerCase()}|${sz}`;
+    if (artCache.has(cacheKey)) {
+      const cached = artCache.get(cacheKey);
+      if (cached && token === artToken && !lastArt) {
+        lastArt = cached;
+        broadcast('art', cached);
+      }
+      return;
+    }
     const clean = mediaFilter.cleanTitle(m.title) || m.title;
     const r = await fetchJson(`https://itunes.apple.com/search?${new URLSearchParams({ term: `${m.artist} ${clean}`, entity: 'song', limit: '5' })}`);
     const url = mediaFilter.pickBestItunesArt(m, r && r.results);
-    if (!url) { console.log('[art] fallback found nothing'); return; }
-    const sz = settings.discSize <= 260 ? '300x300bb' : '600x600bb';
-    const img = await fetch(url.replace('100x100bb', sz));
+    if (!url) { cacheSet(artCache, cacheKey, null); console.log('[art] fallback found nothing'); return; }
+    const imgUrl = url.replace('100x100bb', sz);
+    if (!isTrustedArtUrl(imgUrl)) return;
+    const img = await fetch(imgUrl, { headers: { 'User-Agent': apiUserAgent() }, signal: AbortSignal.timeout(10000) });
     if (!img.ok) return;
     const b64 = Buffer.from(await img.arrayBuffer()).toString('base64');
+    cacheSet(artCache, cacheKey, b64);
     if (token !== artToken || lastArt) return;
     lastArt = b64;
     console.log('[art] fallback cover from iTunes,', Math.round(b64.length / 1024), 'KB');
@@ -1258,15 +1452,12 @@ app.whenReady().then(() => {
     openSettings();
   }
   setTimeout(() => { if (settings.autoUpdate) checkForUpdates(false); }, 6000);
-  setInterval(() => { if (settings.autoUpdate) checkForUpdates(false); }, 2 * 60 * 60 * 1000);
+  setInterval(() => { if (settings.autoUpdate) checkForUpdates(false); }, 12 * 60 * 60 * 1000);
 });
 
 app.on('second-instance', openSettings);
 app.on('before-quit', () => {
   quitting = true;
-  if (!installingUpdate && settings.autoUpdate && app.isPackaged && updateState.status === 'ready') {
-    launchPendingInstaller(false);
-  }
   clearTimeout(audioRetryTimer);
   globalShortcut.unregisterAll();
   if (mediaProc) mediaProc.kill();

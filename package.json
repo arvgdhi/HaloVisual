@@ -37,7 +37,10 @@
       "settings.js",
       "build/icon.png",
       "build/logo.png",
-      "fonts/GoogleSans.ttf"
+      "fonts/GoogleSans.ttf",
+      "fonts/OFL-GoogleSans.txt",
+      "LICENSE",
+      "PRIVACY.md"
     ],
     "extraResources": [
       "media.ps1",
