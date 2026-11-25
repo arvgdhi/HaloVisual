@@ -8,6 +8,7 @@ Works with anything in the Windows media controls (Spotify app, Spotify web in C
 <img width="2878" height="1799" alt="Screenshot 2026-11-24 182739" src="https://github.com/user-attachments/assets/e295f6b2-6161-4df9-bd71-521d0eb055c7" />
 <img width="2878" height="1799" alt="Screenshot 2026-11-24 202123" src="https://github.com/user-attachments/assets/39cf61e4-4f3b-4310-bce8-01c7655a69bf" />
 <img width="2878" height="1799" alt="Screenshot 2026-11-24 201906" src="https://github.com/user-attachments/assets/ac5d1428-b5fa-475b-94d0-ad0aaa7d1d66" />
+
 ## Run
 
 Easiest: download `Halo-Setup-<version>.exe` from GitHub Releases (or build it yourself with `npm run dist`). To run from source:
@@ -62,7 +63,7 @@ Each style has a recommended box size, applied automatically when you pick it un
 - Install it like normal software: run `Halo-Setup-<version>.exe` from GitHub Releases (with matching `SHA256SUMS.txt`). It installs for your user (no admin prompt), adds Start menu and desktop shortcuts, and can be removed from Windows Settings > Apps. Turn on General > "Start Halo with Windows" to launch it at sign-in.
 - **Updates**: Installed copies check tagged GitHub Releases (`v*`), verify the downloaded installer against `SHA256SUMS.txt`, and prompt you to click **Install & restart** when ready.
 - The installer is not code-signed yet, so Windows SmartScreen may say "unknown publisher": verify the hash against `SHA256SUMS.txt`, then choose More info > Run anyway.
-- To build the installer yourself on Windows: `npm ci` then `npm run dist` (output in `dist`).
+- To build yourself on Windows: `npm ci` then `npm run dist` (NSIS installer) or `npm run dist:store` (Microsoft Store `.appx`, output in `dist`).
 - On GitHub: every push to `main` builds a CI artifact (Actions > latest run > Artifacts). Push a semver tag like `v6.2.1` to publish a public GitHub Release with `Halo-Setup-<version>.exe` and `SHA256SUMS.txt`.
 
 ## License & Credits

@@ -1,3 +1,17 @@
 node_modules/
 dist/
 Halo-Setup-*.exe
+*.appx
+*.msix
+*.appxbundle
+*.msixbundle
+*.pfx
+*.p12
+*.cer
+*.key
+.env
+.env.*
+*.log
+npm-debug.log*
+Thumbs.db
+.DS_Store

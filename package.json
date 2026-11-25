@@ -73,10 +73,11 @@
     },
     "appx": {
       "applicationId": "Halo",
-      "displayName": "Halo",
-      "identityName": "REPLACE_WITH_PARTNER_CENTER_IDENTITY_NAME",
-      "publisher": "CN=REPLACE_WITH_PARTNER_CENTER_PUBLISHER_ID",
-      "publisherDisplayName": "Aarav Gandhi",
+      "displayName": "HaloVisual",
+      "identityName": "arvgdhi.HaloVisual",
+      "publisher": "CN=C9757632-C4CD-433A-B235-92B52815EBD1",
+      "publisherDisplayName": "arvgdhi",
+      "artifactName": "HaloVisual-${version}.${ext}",
       "backgroundColor": "#000000",
       "languages": [
         "en-US"
