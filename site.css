@@ -328,11 +328,13 @@ section[id] {
 
 .hero-layout {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 34px;
 }
 
 .hero-copy {
   max-width: 720px;
+  min-width: 0;
 }
 
 .hero-copy h1 {
@@ -368,19 +370,23 @@ section[id] {
 /* ==================== Framed 16:10 Screenshot Stage ==================== */
 .stage-column {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+  min-width: 0;
 }
 
 .stage-shell {
   border-radius: var(--radius-xl);
   padding: 14px;
+  min-width: 0;
 }
 
 .stage-chrome {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px 12px;
   padding: 2px 4px 12px;
 }
 
@@ -425,87 +431,212 @@ section[id] {
   border-color: rgba(255, 255, 255, 0.28);
 }
 
-.stage-viewport {
-  border-radius: 16px;
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
   overflow: hidden;
-  background: #000000;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  aspect-ratio: 16 / 10;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-.stage-viewport img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  aspect-ratio: 16 / 10;
-  transition: opacity 0.22s ease;
-}
-
-.stage-viewport img.is-swapping {
-  opacity: 0.72;
-}
-
-/* ==================== 5 Preset Choice Cards ==================== */
-.preset-strip {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.preset-card {
+.carousel {
   position: relative;
+  min-width: 0;
+}
+
+.stage-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stage-counter {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.carousel-controls {
+  position: absolute;
+  inset: 0;
+  bottom: 62px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  pointer-events: none;
+}
+
+.carousel-btn {
+  pointer-events: auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  touch-action: manipulation;
+  background: rgba(10, 12, 18, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: #ffffff;
+  cursor: pointer;
+  transition: transform 0.16s var(--ease), background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.carousel-btn:hover {
+  background: rgba(24, 27, 40, 0.88);
+  border-color: rgba(255, 255, 255, 0.42);
+  transform: scale(1.04);
+}
+
+.carousel-btn:focus-visible,
+.carousel-markers button:focus-visible,
+.carousel-track:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-1) 80%, #ffffff);
+  outline-offset: 2px;
+}
+
+.carousel-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.carousel-track {
+  position: relative;
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  touch-action: manipulation;
+  padding-inline: 7%;
+  scrollbar-width: none;
+  border-radius: 16px;
+}
+
+.carousel-track::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .carousel-track {
+    scroll-behavior: smooth;
+  }
+}
+
+.carousel-slide {
+  margin: 0;
+  flex: 0 0 86%;
+  scroll-snap-align: center;
   display: grid;
   gap: 10px;
-  padding: 9px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: background-color 0.18s ease, border-color 0.2s ease, box-shadow 0.22s ease;
+  min-width: 0;
 }
 
-.preset-card img {
+.carousel-slide img {
   width: 100%;
   aspect-ratio: 16 / 10;
   object-fit: cover;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #000000;
 }
 
-.preset-text {
-  display: grid;
-  gap: 2px;
-  padding-inline: 2px;
+.slide-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 14px;
+  padding: 0 6px;
 }
 
-.preset-text strong {
-  font-size: 14px;
+.slide-caption strong {
+  font-size: 14.5px;
   font-weight: 600;
-  line-height: 1.25;
+  color: var(--ink);
 }
 
-.preset-text span {
-  font-size: 12px;
-  color: var(--ink-muted);
-  line-height: 1.3;
-}
-
-.preset-card:hover {
-  background: var(--glass-bg-hover);
-  border-color: rgba(255, 255, 255, 0.22);
-}
-
-.preset-card:has(> :checked) {
-  background: rgba(24, 27, 42, 0.76);
-  border-color: color-mix(in srgb, var(--accent-1) 70%, #ffffff);
-  box-shadow: var(--glass-rim), 0 0 0 1px color-mix(in srgb, var(--accent-1) 28%, transparent);
-}
-
-.preset-card:has(> :checked) .preset-text span {
+.slide-caption span {
+  font-size: 13px;
   color: var(--ink-dim);
 }
 
-.preset-card:has(> :focus-visible) {
-  outline: 2px solid color-mix(in srgb, var(--accent-1) 80%, #ffffff);
-  outline-offset: 2px;
+/* Continuous looping via CSS order parking (do not default --current in CSS) */
+.carousel-track > :first-child {
+  order: clamp(0, var(--current) - (var(--children-count, sibling-count()) - 3), 1);
+}
+
+.carousel-track > :last-child {
+  order: calc(-1 * clamp(0, 2 - var(--current), 1));
+}
+
+/* Decorative scroll-driven emphasis */
+@keyframes halo-slide-focus {
+  0% {
+    scale: 0.94;
+    opacity: 0.56;
+  }
+  50% {
+    scale: 1;
+    opacity: 1;
+  }
+  100% {
+    scale: 0.94;
+    opacity: 0.56;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports ((animation-timeline: view()) and (animation-range: entry)) {
+    .carousel-slide {
+      animation: halo-slide-focus auto linear both;
+      animation-timeline: view(inline);
+    }
+  }
+}
+
+.carousel-markers {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.carousel-markers button {
+  padding: 0;
+  width: 26px;
+  height: 26px;
+  border: 9px solid transparent;
+  background-color: rgba(255, 255, 255, 0.3);
+  background-clip: padding-box;
+  border-radius: 999px;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: width 0.22s var(--ease), background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.carousel-markers button:hover {
+  background-color: rgba(255, 255, 255, 0.62);
+}
+
+.carousel-markers button[aria-current="true"] {
+  width: 46px;
+  background-color: #f5f5f7;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-1) 60%, transparent);
 }
 
 /* ==================== Bento Feature Showcase ==================== */
@@ -1030,10 +1161,6 @@ kbd {
 
 /* ==================== Responsive Breakpoints ==================== */
 @media (max-width: 1020px) {
-  .preset-strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   .bento-span-7,
   .bento-span-5 {
     grid-column: span 6;
@@ -1067,13 +1194,23 @@ kbd {
     padding: 36px 0 36px;
   }
 
-  .preset-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+  .carousel-track {
+    padding-inline: 0;
+    gap: 12px;
   }
 
-  .preset-card:last-child {
-    grid-column: span 2;
+  .carousel-slide {
+    flex: 0 0 100%;
+  }
+
+  .carousel-controls {
+    padding: 0 8px;
+    bottom: 56px;
+  }
+
+  .carousel-btn {
+    width: 38px;
+    height: 38px;
   }
 
   .bento-span-7,

@@ -62,10 +62,16 @@
   let installerSize = '80.8 MB';
   let installerStatus = 'checking';
 
-  const stageImg = $('stage-img');
   const stageLyricLabel = $('stage-lyric-label');
   const stageGlowLabel = $('stage-glow-label');
   const stageDiscLabel = $('stage-disc-label');
+  const stageCounter = $('stage-counter');
+
+  const track = $('carousel-track');
+  const markersNav = $('carousel-markers');
+  const statusEl = $('carousel-status');
+  const prevBtn = document.querySelector('[data-direction="previous"]');
+  const nextBtn = document.querySelector('[data-direction="next"]');
 
   const lightboxDialog = $('lightbox-dialog');
   const lightboxImg = $('lightbox-img');
@@ -74,7 +80,20 @@
 
   const releaseDialog = $('release-dialog');
 
-  function applyPreset(idx) {
+  const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+  const slides = track ? Array.from(track.querySelectorAll('.carousel-slide')) : [];
+  let markerButtons = [];
+  let lastUiIndex = -1;
+  let settledIndex = 0;
+  let pendingTarget = null;
+  let lastRequestScrollLeft = null;
+  let queuedDirection = null;
+  let rafId = null;
+  let settleTimer = null;
+  let lockToken = 0;
+
+  function syncActiveUI(idx) {
     const p = PRESETS[(idx + PRESETS.length) % PRESETS.length];
     activeIndex = p.index;
 
@@ -84,15 +103,7 @@
     if (stageLyricLabel) stageLyricLabel.textContent = p.lyrics;
     if (stageGlowLabel) stageGlowLabel.textContent = p.glow;
     if (stageDiscLabel) stageDiscLabel.textContent = p.disc;
-
-    if (stageImg && stageImg.getAttribute('src') !== p.src) {
-      stageImg.classList.add('is-swapping');
-      stageImg.src = p.src;
-      stageImg.alt = p.alt;
-      window.setTimeout(() => stageImg.classList.remove('is-swapping'), 160);
-    } else if (stageImg) {
-      stageImg.alt = p.alt;
-    }
+    if (stageCounter) stageCounter.textContent = `${p.index + 1} / ${PRESETS.length}`;
 
     if (lightboxImg) {
       lightboxImg.src = p.src;
@@ -101,15 +112,230 @@
     if (lightboxTitle) lightboxTitle.textContent = p.lyrics;
     if (lightboxSubtitle) lightboxSubtitle.textContent = `${p.glow}, ${p.disc}`;
 
-    const radio = document.querySelector(`.preset-strip input[name="preset"][value="${p.index}"]`);
-    if (radio && !radio.checked) radio.checked = true;
+    if (idx !== lastUiIndex) {
+      lastUiIndex = idx;
+      markerButtons.forEach((btn, i) => {
+        if (i === idx) btn.setAttribute('aria-current', 'true');
+        else btn.removeAttribute('aria-current');
+      });
+    }
   }
 
-  document.querySelectorAll('.preset-strip input[name="preset"]').forEach((radio) => {
-    radio.addEventListener('change', () => {
-      if (radio.checked) applyPreset(Number(radio.value) || 0);
+  function visualSlides() {
+    return [...slides].sort((a, b) => a.offsetLeft - b.offsetLeft);
+  }
+
+  function scrollDeltaFor(slide) {
+    const tRect = track.getBoundingClientRect();
+    const sRect = slide.getBoundingClientRect();
+    return (sRect.left + sRect.width / 2) - (tRect.left + tRect.width / 2);
+  }
+
+  function nearestSlideIndex() {
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < slides.length; i++) {
+      const dist = Math.abs(scrollDeltaFor(slides[i]));
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+    return bestIdx;
+  }
+
+  function applyParking(targetIdx, { lockOverflow = true } = {}) {
+    if (!track || slides.length < 3) return;
+    const desired = targetIdx === null ? 'initial' : String(targetIdx);
+    const current = track.style.getPropertyValue('--current').trim();
+    if (current === desired) return;
+
+    const anchor = slides[nearestSlideIndex()];
+    const before = anchor.offsetLeft;
+
+    track.style.scrollSnapType = 'none';
+    track.style.scrollBehavior = 'auto';
+    if (lockOverflow) track.style.overflowX = 'hidden';
+
+    if (targetIdx === null) {
+      track.style.setProperty('--current', 'initial');
+    } else {
+      track.style.setProperty('--current', desired);
+    }
+
+    const after = anchor.offsetLeft;
+    if (after !== before) {
+      track.scrollLeft += after - before;
+    }
+
+    track.style.scrollSnapType = '';
+    track.style.scrollBehavior = '';
+
+    if (lockOverflow) {
+      const myToken = ++lockToken;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (myToken === lockToken) track.style.overflowX = '';
+        });
+      });
+    } else {
+      track.style.overflowX = '';
+    }
+  }
+
+  function announceSlide(idx) {
+    if (!statusEl) return;
+    const p = PRESETS[idx];
+    if (!p) return;
+    statusEl.textContent = `Slide ${idx + 1} of ${PRESETS.length}: ${p.lyrics}, ${p.glow}, ${p.disc}`;
+  }
+
+  function onSettle() {
+    if (!track || !slides.length) return;
+    if (
+      pendingTarget !== null &&
+      lastRequestScrollLeft !== null &&
+      Math.abs(track.scrollLeft - lastRequestScrollLeft) < 1
+    ) {
+      return;
+    }
+
+    pendingTarget = null;
+    lastRequestScrollLeft = null;
+
+    const idx = nearestSlideIndex();
+    syncActiveUI(idx);
+    applyParking(idx, { lockOverflow: !queuedDirection });
+
+    if (idx !== settledIndex) {
+      settledIndex = idx;
+      announceSlide(idx);
+    }
+
+    if (queuedDirection !== null) {
+      const dir = queuedDirection;
+      queuedDirection = null;
+      stepBy(dir);
+    }
+  }
+
+  function stepBy(direction) {
+    if (!track || !slides.length) return;
+    if (track.style.getPropertyValue('--current').trim() === 'initial') {
+      queuedDirection = direction;
+      return;
+    }
+
+    const baseSlide = pendingTarget !== null ? slides[pendingTarget] : slides[nearestSlideIndex()];
+    const ordered = visualSlides();
+    const visualPos = ordered.indexOf(baseSlide);
+    const nextSlide = ordered[visualPos + direction];
+    if (!nextSlide) {
+      if (pendingTarget !== null && slides.length >= 3) {
+        queuedDirection = direction;
+      }
+      return;
+    }
+
+    const nextIdx = Number(nextSlide.dataset.index);
+    const delta = scrollDeltaFor(nextSlide);
+    pendingTarget = nextIdx;
+    lastRequestScrollLeft = track.scrollLeft;
+    syncActiveUI(nextIdx);
+
+    if (Math.abs(delta) < 1) {
+      onSettle();
+      return;
+    }
+
+    track.scrollBy({
+      left: delta,
+      behavior: prefersReducedMotion() ? 'instant' : 'smooth',
     });
-  });
+  }
+
+  function goToMarker(targetIdx) {
+    if (!track || !slides[targetIdx]) return;
+    if (pendingTarget === null && nearestSlideIndex() === targetIdx) {
+      syncActiveUI(targetIdx);
+      return;
+    }
+
+    queuedDirection = null;
+    applyParking(null, { lockOverflow: false });
+
+    const delta = scrollDeltaFor(slides[targetIdx]);
+    pendingTarget = targetIdx;
+    lastRequestScrollLeft = track.scrollLeft;
+    syncActiveUI(targetIdx);
+
+    if (Math.abs(delta) < 1) {
+      onSettle();
+      return;
+    }
+
+    track.scrollBy({
+      left: delta,
+      behavior: prefersReducedMotion() ? 'instant' : 'smooth',
+    });
+  }
+
+  if (track && slides.length) {
+    if (!CSS.supports('order: sibling-count()')) {
+      track.style.setProperty('--children-count', String(slides.length));
+    }
+
+    if (markersNav) {
+      markersNav.textContent = '';
+      markerButtons = slides.map((slide, idx) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('aria-label', slide.dataset.markerName || `Go to slide ${idx + 1}`);
+        btn.addEventListener('click', () => goToMarker(idx));
+        markersNav.appendChild(btn);
+        return btn;
+      });
+    }
+
+    // Center initial slide quietly before attaching scroll listeners
+    applyParking(0, { lockOverflow: false });
+    track.style.scrollBehavior = 'auto';
+    const initialDelta = scrollDeltaFor(slides[0]);
+    if (Math.abs(initialDelta) >= 1) track.scrollLeft += initialDelta;
+    track.style.scrollBehavior = '';
+    settledIndex = 0;
+    syncActiveUI(0);
+
+    prevBtn?.addEventListener('click', () => stepBy(-1));
+    nextBtn?.addEventListener('click', () => stepBy(1));
+
+    track.addEventListener('scroll', () => {
+      if (pendingTarget === null && rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          if (pendingTarget === null) syncActiveUI(nearestSlideIndex());
+        });
+      }
+      if (!('onscrollend' in window)) {
+        window.clearTimeout(settleTimer);
+        settleTimer = window.setTimeout(onSettle, 150);
+      }
+    }, { passive: true });
+
+    if ('onscrollend' in window) {
+      track.addEventListener('scrollend', onSettle);
+    }
+
+    window.addEventListener('resize', () => {
+      if (pendingTarget !== null) return;
+      const target = slides[settledIndex];
+      if (!target) return;
+      track.style.scrollBehavior = 'auto';
+      const delta = scrollDeltaFor(target);
+      if (Math.abs(delta) >= 1) track.scrollLeft += delta;
+      track.style.scrollBehavior = '';
+    });
+  }
 
   // Top-layer dialog animation & fallback helpers per modern-web-guidance
   let supportsDisplayTransition;
@@ -184,22 +410,30 @@
 
   $('lightbox-open-btn')?.addEventListener('click', () => {
     if (lightboxDialog && typeof lightboxDialog.showModal === 'function') {
-      applyPreset(activeIndex);
+      syncActiveUI(activeIndex);
       lightboxDialog.removeAttribute('data-closing');
       lightboxDialog.showModal();
     }
   });
 
-  $('lightbox-prev-btn')?.addEventListener('click', () => applyPreset(activeIndex - 1));
-  $('lightbox-next-btn')?.addEventListener('click', () => applyPreset(activeIndex + 1));
+  function stepLightbox(direction) {
+    if (track && slides.length) {
+      stepBy(direction);
+    } else {
+      syncActiveUI(activeIndex + direction);
+    }
+  }
+
+  $('lightbox-prev-btn')?.addEventListener('click', () => stepLightbox(-1));
+  $('lightbox-next-btn')?.addEventListener('click', () => stepLightbox(1));
 
   lightboxDialog?.addEventListener('keydown', (event) => {
     if (event.key === 'ArrowLeft') {
       event.preventDefault();
-      applyPreset(activeIndex - 1);
+      stepLightbox(-1);
     } else if (event.key === 'ArrowRight') {
       event.preventDefault();
-      applyPreset(activeIndex + 1);
+      stepLightbox(1);
     }
   });
 
@@ -307,6 +541,5 @@
     });
   });
 
-  applyPreset(0);
   resolveInstallerTarget();
 })();

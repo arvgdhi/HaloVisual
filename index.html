@@ -84,66 +84,119 @@
                 <span class="stage-pill" id="stage-glow-label">Corner Glow</span>
                 <span class="stage-pill" id="stage-disc-label">Neon Acrylic</span>
               </div>
-              <button type="button" id="lightbox-open-btn" class="stage-inspect-btn" aria-haspopup="dialog" aria-controls="lightbox-dialog">
-                Expand
-              </button>
+              <div class="stage-actions-group">
+                <span class="stage-counter" id="stage-counter" aria-hidden="true">1 / 5</span>
+                <button type="button" id="lightbox-open-btn" class="stage-inspect-btn" aria-haspopup="dialog" aria-controls="lightbox-dialog">
+                  Expand
+                </button>
+              </div>
             </div>
 
-            <div class="stage-viewport">
-              <img id="stage-img"
-                   src="assets/screens/fisheye-corner-acrylic.jpg"
-                   width="1024"
-                   height="640"
-                   fetchpriority="high"
-                   alt="Halo desktop screenshot showing Fisheye lyrics, Corner Glow edge lighting, and Neon Acrylic record">
+            <div class="carousel" role="region" aria-roledescription="carousel" aria-label="Halo desktop setups">
+              <div class="carousel-controls">
+                <button type="button" class="carousel-btn" data-direction="previous" aria-label="Previous slide">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+                </button>
+                <button type="button" class="carousel-btn" data-direction="next" aria-label="Next slide">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                </button>
+              </div>
+
+              <div class="carousel-track" id="carousel-track" tabindex="0" role="group" aria-label="Slides">
+                <figure class="carousel-slide"
+                        role="group"
+                        aria-roledescription="slide"
+                        aria-label="1 of 5"
+                        data-index="0"
+                        data-marker-name="Fisheye — Corner Glow, Neon Acrylic">
+                  <img src="assets/screens/fisheye-corner-acrylic.jpg"
+                       width="1024"
+                       height="640"
+                       fetchpriority="high"
+                       alt="Halo desktop screenshot showing Fisheye lyrics, Corner Glow edge lighting, and Neon Acrylic record">
+                  <figcaption class="slide-caption">
+                    <strong>Fisheye</strong>
+                    <span>Corner Glow, Neon Acrylic</span>
+                  </figcaption>
+                </figure>
+
+                <figure class="carousel-slide"
+                        role="group"
+                        aria-roledescription="slide"
+                        aria-label="2 of 5"
+                        data-index="1"
+                        data-marker-name="Visual — Rounded Neon, Picture disc">
+                  <img src="assets/screens/visual-rounded-picture.jpg"
+                       width="1024"
+                       height="640"
+                       fetchpriority="low"
+                       loading="lazy"
+                       alt="Halo desktop screenshot showing Visual lyrics, Rounded Neon border glow, and Picture disc record">
+                  <figcaption class="slide-caption">
+                    <strong>Visual</strong>
+                    <span>Rounded Neon, Picture disc</span>
+                  </figcaption>
+                </figure>
+
+                <figure class="carousel-slide"
+                        role="group"
+                        aria-roledescription="slide"
+                        aria-label="3 of 5"
+                        data-index="2"
+                        data-marker-name="Branch — Liquid, Holographic CD">
+                  <img src="assets/screens/branch-liquid-cd.jpg"
+                       width="1024"
+                       height="640"
+                       fetchpriority="low"
+                       loading="lazy"
+                       alt="Halo desktop screenshot showing Branch curve lyrics, Liquid edge glow, and Holographic CD">
+                  <figcaption class="slide-caption">
+                    <strong>Branch</strong>
+                    <span>Liquid, Holographic CD</span>
+                  </figcaption>
+                </figure>
+
+                <figure class="carousel-slide"
+                        role="group"
+                        aria-roledescription="slide"
+                        aria-label="4 of 5"
+                        data-index="3"
+                        data-marker-name="Constellation — Bars, Turntable Deck">
+                  <img src="assets/screens/constellation-bars-turntable.jpg"
+                       width="1024"
+                       height="640"
+                       fetchpriority="low"
+                       loading="lazy"
+                       alt="Halo desktop screenshot showing Constellation lyrics, Spectrum Bars edge glow, and Turntable Deck">
+                  <figcaption class="slide-caption">
+                    <strong>Constellation</strong>
+                    <span>Bars, Turntable Deck</span>
+                  </figcaption>
+                </figure>
+
+                <figure class="carousel-slide"
+                        role="group"
+                        aria-roledescription="slide"
+                        aria-label="5 of 5"
+                        data-index="4"
+                        data-marker-name="Messages — Aurora, Album Sleeve">
+                  <img src="assets/screens/messages-aurora-sleeve.jpg"
+                       width="1024"
+                       height="640"
+                       fetchpriority="low"
+                       loading="lazy"
+                       alt="Halo desktop screenshot showing Messages chat lyrics, Aurora edge glow, and Album Sleeve">
+                  <figcaption class="slide-caption">
+                    <strong>Messages</strong>
+                    <span>Aurora, Album Sleeve</span>
+                  </figcaption>
+                </figure>
+              </div>
+
+              <p class="visually-hidden" id="carousel-status" role="status" aria-live="polite"></p>
+
+              <nav class="carousel-markers" id="carousel-markers" aria-label="Choose a slide"></nav>
             </div>
-          </div>
-
-          <div class="preset-strip" role="radiogroup" aria-label="Choose a Halo visual setup">
-            <label class="preset-card glass-card">
-              <input type="radio" name="preset" value="0" class="sr-only-radio" checked>
-              <img src="assets/screens/fisheye-corner-acrylic.jpg" width="1024" height="640" alt="">
-              <span class="preset-text">
-                <strong>Fisheye</strong>
-                <span>Corner Glow, Neon Acrylic</span>
-              </span>
-            </label>
-
-            <label class="preset-card glass-card">
-              <input type="radio" name="preset" value="1" class="sr-only-radio">
-              <img src="assets/screens/visual-rounded-picture.jpg" width="1024" height="640" alt="">
-              <span class="preset-text">
-                <strong>Visual</strong>
-                <span>Rounded Neon, Picture disc</span>
-              </span>
-            </label>
-
-            <label class="preset-card glass-card">
-              <input type="radio" name="preset" value="2" class="sr-only-radio">
-              <img src="assets/screens/branch-liquid-cd.jpg" width="1024" height="640" alt="">
-              <span class="preset-text">
-                <strong>Branch</strong>
-                <span>Liquid, Holographic CD</span>
-              </span>
-            </label>
-
-            <label class="preset-card glass-card">
-              <input type="radio" name="preset" value="3" class="sr-only-radio">
-              <img src="assets/screens/constellation-bars-turntable.jpg" width="1024" height="640" alt="">
-              <span class="preset-text">
-                <strong>Constellation</strong>
-                <span>Bars, Turntable Deck</span>
-              </span>
-            </label>
-
-            <label class="preset-card glass-card">
-              <input type="radio" name="preset" value="4" class="sr-only-radio">
-              <img src="assets/screens/messages-aurora-sleeve.jpg" width="1024" height="640" alt="">
-              <span class="preset-text">
-                <strong>Messages</strong>
-                <span>Aurora, Album Sleeve</span>
-              </span>
-            </label>
           </div>
         </div>
       </div>
