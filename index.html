@@ -79,20 +79,24 @@
         <div class="stage-column">
           <div class="stage-shell glass-panel">
             <div class="stage-chrome">
-              <div class="stage-tags" aria-live="polite">
+              <div class="stage-tags">
                 <span class="stage-pill stage-pill-primary" id="stage-lyric-label">Fisheye</span>
                 <span class="stage-pill" id="stage-glow-label">Corner Glow</span>
                 <span class="stage-pill" id="stage-disc-label">Neon Acrylic</span>
               </div>
               <div class="stage-actions-group">
                 <span class="stage-counter" id="stage-counter" aria-hidden="true">1 / 5</span>
+                <button type="button" id="carousel-autoplay-btn" class="stage-inspect-btn autoplay-btn" aria-label="Pause automatic slideshow">
+                  <span class="autoplay-dot" aria-hidden="true"></span>
+                  <span id="carousel-autoplay-label">Pause</span>
+                </button>
                 <button type="button" id="lightbox-open-btn" class="stage-inspect-btn" aria-haspopup="dialog" aria-controls="lightbox-dialog">
                   Expand
                 </button>
               </div>
             </div>
 
-            <div class="carousel" role="region" aria-roledescription="carousel" aria-label="Halo desktop setups">
+            <div class="carousel" id="hero-carousel" data-autoplay="running" role="region" aria-roledescription="carousel" aria-label="Halo desktop setups">
               <div class="carousel-controls">
                 <button type="button" class="carousel-btn" data-direction="previous" aria-label="Previous slide">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>

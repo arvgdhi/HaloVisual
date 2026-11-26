@@ -67,6 +67,9 @@
   const stageDiscLabel = $('stage-disc-label');
   const stageCounter = $('stage-counter');
 
+  const carouselEl = $('hero-carousel');
+  const autoplayBtn = $('carousel-autoplay-btn');
+  const autoplayLabel = $('carousel-autoplay-label');
   const track = $('carousel-track');
   const markersNav = $('carousel-markers');
   const statusEl = $('carousel-status');
@@ -80,7 +83,9 @@
 
   const releaseDialog = $('release-dialog');
 
-  const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const AUTOPLAY_MS = 4500;
+  const reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const prefersReducedMotion = () => Boolean(reducedMotionQuery?.matches);
 
   const slides = track ? Array.from(track.querySelectorAll('.carousel-slide')) : [];
   let markerButtons = [];
@@ -92,6 +97,14 @@
   let rafId = null;
   let settleTimer = null;
   let lockToken = 0;
+
+  let userPaused = prefersReducedMotion();
+  let isHovered = false;
+  let isFocused = false;
+  let isInView = true;
+  let isPageVisible = !document.hidden;
+  let autoplayTimer = null;
+  let lastMoveWasAuto = false;
 
   function syncActiveUI(idx) {
     const p = PRESETS[(idx + PRESETS.length) % PRESETS.length];
@@ -190,6 +203,53 @@
     statusEl.textContent = `Slide ${idx + 1} of ${PRESETS.length}: ${p.lyrics}, ${p.glow}, ${p.disc}`;
   }
 
+  function canAutoplay() {
+    return Boolean(
+      track &&
+      slides.length > 1 &&
+      !userPaused &&
+      !isHovered &&
+      !isFocused &&
+      isInView &&
+      isPageVisible &&
+      !lightboxDialog?.open &&
+      !releaseDialog?.open
+    );
+  }
+
+  function syncAutoplayUI() {
+    if (carouselEl) {
+      carouselEl.dataset.autoplay = canAutoplay() ? 'running' : 'paused';
+    }
+    if (autoplayLabel) {
+      autoplayLabel.textContent = userPaused ? 'Play' : 'Pause';
+    }
+    if (autoplayBtn) {
+      autoplayBtn.setAttribute('aria-label', userPaused ? 'Play automatic slideshow' : 'Pause automatic slideshow');
+    }
+  }
+
+  function clearAutoplay() {
+    if (autoplayTimer !== null) {
+      window.clearTimeout(autoplayTimer);
+      autoplayTimer = null;
+    }
+  }
+
+  function scheduleAutoplay() {
+    clearAutoplay();
+    syncAutoplayUI();
+    if (!canAutoplay()) return;
+    autoplayTimer = window.setTimeout(() => {
+      autoplayTimer = null;
+      if (!canAutoplay() || pendingTarget !== null) {
+        scheduleAutoplay();
+        return;
+      }
+      stepBy(1, { auto: true });
+    }, AUTOPLAY_MS);
+  }
+
   function onSettle() {
     if (!track || !slides.length) return;
     if (
@@ -207,20 +267,26 @@
     syncActiveUI(idx);
     applyParking(idx, { lockOverflow: !queuedDirection });
 
-    if (idx !== settledIndex) {
-      settledIndex = idx;
+    if (idx !== settledIndex && !lastMoveWasAuto) {
       announceSlide(idx);
     }
+    settledIndex = idx;
+    lastMoveWasAuto = false;
 
     if (queuedDirection !== null) {
       const dir = queuedDirection;
       queuedDirection = null;
       stepBy(dir);
+      return;
     }
+
+    scheduleAutoplay();
   }
 
-  function stepBy(direction) {
+  function stepBy(direction, { auto = false } = {}) {
     if (!track || !slides.length) return;
+    lastMoveWasAuto = Boolean(auto);
+    clearAutoplay();
     if (track.style.getPropertyValue('--current').trim() === 'initial') {
       queuedDirection = direction;
       return;
@@ -256,8 +322,11 @@
 
   function goToMarker(targetIdx) {
     if (!track || !slides[targetIdx]) return;
+    lastMoveWasAuto = false;
+    clearAutoplay();
     if (pendingTarget === null && nearestSlideIndex() === targetIdx) {
       syncActiveUI(targetIdx);
+      scheduleAutoplay();
       return;
     }
 
@@ -305,16 +374,71 @@
     track.style.scrollBehavior = '';
     settledIndex = 0;
     syncActiveUI(0);
+    scheduleAutoplay();
+
+    autoplayBtn?.addEventListener('click', () => {
+      userPaused = !userPaused;
+      scheduleAutoplay();
+    });
+
+    carouselEl?.addEventListener('pointerenter', (event) => {
+      if (event.pointerType !== 'touch') {
+        isHovered = true;
+        scheduleAutoplay();
+      }
+    });
+
+    carouselEl?.addEventListener('pointerleave', (event) => {
+      if (event.pointerType !== 'touch') {
+        isHovered = false;
+        scheduleAutoplay();
+      }
+    });
+
+    carouselEl?.addEventListener('focusin', () => {
+      isFocused = true;
+      scheduleAutoplay();
+    });
+
+    carouselEl?.addEventListener('focusout', (event) => {
+      if (!carouselEl.contains(event.relatedTarget)) {
+        isFocused = false;
+        scheduleAutoplay();
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      isPageVisible = !document.hidden;
+      scheduleAutoplay();
+    });
+
+    if (carouselEl && typeof IntersectionObserver === 'function') {
+      const observer = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          isInView = entry.isIntersecting;
+          scheduleAutoplay();
+        }
+      }, { threshold: 0.2 });
+      observer.observe(carouselEl);
+    }
+
+    reducedMotionQuery?.addEventListener('change', (event) => {
+      if (event.matches) userPaused = true;
+      scheduleAutoplay();
+    });
 
     prevBtn?.addEventListener('click', () => stepBy(-1));
     nextBtn?.addEventListener('click', () => stepBy(1));
 
     track.addEventListener('scroll', () => {
-      if (pendingTarget === null && rafId === null) {
-        rafId = requestAnimationFrame(() => {
-          rafId = null;
-          if (pendingTarget === null) syncActiveUI(nearestSlideIndex());
-        });
+      if (pendingTarget === null) {
+        clearAutoplay();
+        if (rafId === null) {
+          rafId = requestAnimationFrame(() => {
+            rafId = null;
+            if (pendingTarget === null) syncActiveUI(nearestSlideIndex());
+          });
+        }
       }
       if (!('onscrollend' in window)) {
         window.clearTimeout(settleTimer);
@@ -388,6 +512,8 @@
       closeTopLayer(dialog);
     });
 
+    dialog.addEventListener('close', () => scheduleAutoplay());
+
     // Fallback for browsers without <dialog closedby="any"> support
     if (!('closedBy' in HTMLDialogElement.prototype)) {
       dialog.addEventListener('click', (event) => {
@@ -413,6 +539,8 @@
       syncActiveUI(activeIndex);
       lightboxDialog.removeAttribute('data-closing');
       lightboxDialog.showModal();
+      clearAutoplay();
+      syncAutoplayUI();
     }
   });
 
@@ -567,6 +695,8 @@
         event.preventDefault();
         releaseDialog.removeAttribute('data-closing');
         releaseDialog.showModal();
+        clearAutoplay();
+        syncAutoplayUI();
       }
     });
   });

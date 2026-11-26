@@ -449,6 +449,7 @@ section[id] {
 
 .stage-actions-group {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
 }
@@ -458,6 +459,25 @@ section[id] {
   font-weight: 500;
   color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
+}
+
+.autoplay-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.autoplay-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-1);
+  transition: background-color 0.2s ease, opacity 0.2s ease;
+}
+
+.stage-shell:has(.carousel[data-autoplay="paused"]) .autoplay-dot {
+  background: var(--ink-muted);
+  opacity: 0.65;
 }
 
 .carousel-controls {
@@ -617,6 +637,7 @@ section[id] {
 }
 
 .carousel-markers button {
+  position: relative;
   padding: 0;
   width: 26px;
   height: 26px;
@@ -637,6 +658,31 @@ section[id] {
   width: 46px;
   background-color: #f5f5f7;
   box-shadow: 0 0 12px color-mix(in srgb, var(--accent-1) 60%, transparent);
+}
+
+@keyframes halo-marker-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .carousel[data-autoplay="running"] .carousel-markers button[aria-current="true"] {
+    background-color: rgba(255, 255, 255, 0.26);
+  }
+
+  .carousel[data-autoplay="running"] .carousel-markers button[aria-current="true"]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    background: #f5f5f7;
+    transform-origin: left center;
+    animation: halo-marker-progress 4.5s linear forwards;
+  }
 }
 
 /* ==================== Bento Feature Showcase ==================== */
